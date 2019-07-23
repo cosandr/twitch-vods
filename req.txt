@@ -1,0 +1,2 @@
+streamlink
+ffmpeg-python
