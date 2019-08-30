@@ -133,8 +133,11 @@ class Check():
             os.mkdir(proc_path)
         self.mp4_vid = F"{proc_path}/{conv_name}.mp4"
         cmd = F'ffmpeg -i {source} -err_detect ignore_err -f mp4 -acodec aac -c copy -y -v info -hide_banner "{self.mp4_vid}"'
-        p = await asyncio.create_subprocess_shell(cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-        await asyncio.gather(self.watch(p.stdout, 'ffmpeg', prefix='STDOUT:'), self.watch(p.stderr, 'ffmpeg',  prefix='STDERR:'))
+        p = await asyncio.create_subprocess_shell(cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, limit=0)
+        try:
+            await asyncio.gather(self.watch(p.stdout, 'ffmpeg', prefix='STDOUT:'), self.watch(p.stderr, 'ffmpeg',  prefix='STDERR:'))
+        except Exception as e:
+            self.logger.critical(f'stdout/err critical failure: {str(e)}')
         await p.wait()
         if p.returncode != 0:
             self.logger.error(F"FFMPEG non-zero returncode: {p.returncode}")
