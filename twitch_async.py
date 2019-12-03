@@ -102,7 +102,7 @@ class Check():
                 self.logger.debug(F"{self.user} is offline, retrying in {self.timeout}s.")
                 self.loop.create_task(self.timer())
                 self.check_en.clear()
-                
+
 
     async def record(self):
         self.check_en.clear()
@@ -127,7 +127,9 @@ class Check():
 
     async def copy(self, source: str):
         start_time = self.start_dt.strftime("%y%m%d-%H%M")
-        conv_name = F"{start_time}_{self.title}"
+        # Title without illegal NTFS characters
+        win_title = re.sub(r'[<>:"\/\\|?*\n]+', '', self.title)
+        conv_name = F"{start_time}_{win_title}"
         proc_path = F"{cfg.PROC}/{self.user}"
         if not os.path.exists(proc_path):
             os.mkdir(proc_path)
