@@ -1,3 +1,5 @@
+#!/usr/bin/python3
+
 import asyncio
 import logging
 import os
@@ -5,7 +7,7 @@ import re
 import sys
 import traceback
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from logging.handlers import RotatingFileHandler
 
 from aiohttp import ClientSession
@@ -14,10 +16,27 @@ import config as cfg
 
 
 # Run in shell
-# IN= ;OUT= ;ffmpeg -i "${IN}" -c:v libx265 -x265-params crf=23:pools=4 -preset:v medium -c:a aac -y -v info -hide_banner "${OUT}"
+# ffprobe -v quiet -print_format json -show_streams -sexagesimal ${IN}
+# IN= ;OUT= ;ffmpeg -i "${IN}" -c:v libx265 -x265-params crf=23:pools=4 -preset:v medium -c:a aac -y -hide_banner "${OUT}"
+# IN= ;OUT= ;ffmpeg -i "${IN}" -c:v libx265 -x265-params crf=23:pools=4 -preset:v medium -c:a aac -y -progress - -nostats -hide_banner "${OUT}"
+"""
+OUTPUT OF -progress - -nostats
+frame=61
+fps=36.08
+stream_0_0_q=-0.0
+bitrate=   8.6kbits/s
+total_size=3050
+out_time_us=2838000
+out_time_ms=2838000
+out_time=00:00:02.838000
+dup_frames=0
+drop_frames=0
+speed=1.68x
+progress=continue
+"""
 
-FFMPEG_HEVC = 'ffmpeg -i "{0}" -c:v libx265 -x265-params crf=23:pools=4 -preset:v medium -c:a aac -y -v info -hide_banner "{1}"'
-FFMPEG_COPY = 'ffmpeg -i "{0}" -err_detect ignore_err -f mp4 -acodec aac -c copy -y -v info -hide_banner "{1}"'
+FFMPEG_HEVC = 'ffmpeg -i "{0}" -c:v libx265 -x265-params crf=23:pools=4 -preset:v fast -c:a aac -y -progress - -nostats -hide_banner "{1}"'
+FFMPEG_COPY = 'ffmpeg -i "{0}" -err_detect ignore_err -f mp4 -c:a aac -c:v copy -y -progress - -nostats -hide_banner "{1}"'
 TRANSCODE_FILE = 'transcode.json'
 BUSY_FILE = os.path.join(cfg.BUSY, cfg.NAME)
 
@@ -75,7 +94,6 @@ class Check():
         self.unmark_busy()
         if timeout is None:
             timeout = self.timeout
-        self.rec_log.debug(F"Starting timer with {timeout}s timeout.")
         await asyncio.sleep(timeout)
         self.check_en.set()
 
@@ -110,16 +128,15 @@ class Check():
         url = "https://tmi.twitch.tv/hosts"
         params = {'include_logins': 1, 'host': data['data'][0]['user_id']}
         data_host = await self.aio_request(url=url, headers=None, params=params)
-        return
         host_login = data_host['hosts'][0].get('target_login')
         if host_login:
-            self.rec_log.debug(F"{self.user} is live but hosting {host_login}, retrying in 10m.")
+            self.rec_log.info(F"{self.user} is live but hosting {host_login}, retrying in 10m.")
             self.loop.create_task(self.timer(600))
             self.check_en.clear()
             return
         self.title = data['data'][0]['title'].replace("/", "")
         self.start_dt = datetime.now()
-        self.rec_log.debug(F"{self.user} is live: {self.title}")
+        self.rec_log.info(F"{self.user} is live: {self.title}")
         await self.record()
 
     async def record(self):
@@ -197,7 +214,7 @@ class Check():
                     self.t_log.info(f"Running: {self.ffmpeg_src[conv_idx]['cmd']}")
                     await self.run_cmd(self.ffmpeg_src[conv_idx]['cmd'], self.t_log)
                     try:
-                        self.delete_raw(self.ffmpeg_src[conv_idx]['src'], self.ffmpeg_src[conv_idx]['dst'])
+                        await self.delete_raw(self.ffmpeg_src[conv_idx]['src'], self.ffmpeg_src[conv_idx]['dst'])
                         del self.ffmpeg_src[conv_idx]
                     except Exception as e:
                         self.ffmpeg_src[conv_idx]['status'] = 'delete-fail'
@@ -212,7 +229,7 @@ class Check():
             json.dump(self.ffmpeg_src, fw, indent=1, ensure_ascii=False)
         self.t_log.info(f"{len(self.ffmpeg_src)} pending transcodes written.")
 
-    def delete_raw(self, raw_fp: str, proc_fp: str):
+    async def delete_raw(self, raw_fp: str, proc_fp: str):
         if not os.path.exists(proc_fp):
             self.t_log.critical(F"Raw: {raw_fp}\nProcessed [MISSING]: {proc_fp}")
             return
@@ -220,15 +237,33 @@ class Check():
         proc_size = os.path.getsize(proc_fp)
         raw_size_str = f'{raw_size/1e6:,.1f}MB'
         proc_size_str = f'{proc_size/1e6:,.1f}MB'
-        # Make sure MP4 size is at least 40% FLV's
-        if proc_size / raw_size < 0.4:
-            self.t_log.error(f'Raw: {raw_size_str}\nProcessed [SMALL]: {proc_size_str}')
-        else:
-            try:
-                os.unlink(raw_fp)
-                self.t_log.info(f'Raw: {raw_fp} [{raw_size_str}]\nDeleted.')
-            except Exception as e:
-                self.t_log.warning(f'Raw: {raw_fp} [{raw_size_str}]\nFailed to delete: {str(e)}.')
+        raw_dur = await self.read_video_info(raw_fp)
+        proc_dur = await self.read_video_info(proc_fp)
+        if not raw_dur or not proc_dur:
+            return
+        dur_diff = raw_dur - proc_dur
+        if dur_diff.total_seconds() > 2:
+            self.t_log.error(f'Processed file is too short\nRaw {raw_dur} [{raw_size_str}]\nProcessed {proc_dur} [{proc_size_str}]')
+            return
+        try:
+            os.unlink(raw_fp)
+            self.t_log.info(f'Raw: {raw_fp} [{raw_size_str}]\nDeleted.')
+        except Exception as e:
+            self.t_log.warning(f'Raw: {raw_fp} [{raw_size_str}]\nFailed to delete: {str(e)}.')
+    
+    async def read_video_info(self, vid_fp: str):
+        args = ['-v', 'quiet', '-print_format', 'json', '-show_streams', '-sexagesimal', vid_fp]
+        p = await asyncio.create_subprocess_exec('ffprobe', *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        stdout, stderr = await p.communicate()
+        if p.returncode != 0:
+            self.t_log.error(f'Cannot get video info for {vid_fp}')
+            return
+        # Find duration
+        metadata = json.loads(stdout.decode())
+        for stream in metadata['streams']:
+            if stream['codec_type'] == 'video':
+                return self.parse_duration(stream['duration'])
+        return
 
     async def run_cmd(self, cmd: str, logger: logging.Logger):
         exec_name = cmd.split(' ')[0]
@@ -257,6 +292,16 @@ class Check():
             logger.warning(F"[{proc}] STREAM: {str(e)}")
             pass
 
+    @staticmethod
+    def parse_duration(time_str: str):
+        """Parse HH:MM:SS.MICROSECONDS to timedelta"""
+        try:
+            dt = datetime.strptime(time_str, '%H:%M:%S.%f')
+            td = timedelta(hours=dt.hour, minutes=dt.minute, seconds=dt.second, microseconds=dt.microsecond)
+            return td
+        except Exception:
+            return None
+
     def mark_busy(self):
         if not os.path.exists(cfg.BUSY):
             return
@@ -274,6 +319,7 @@ class Check():
                 os.unlink(BUSY_FILE)
             except Exception as e:
                 self.rec_log.error(f'Cannot remove busy file: {str(e)}')
+
 
 if __name__ == '__main__':
     user = os.getenv('STREAM_USER')
