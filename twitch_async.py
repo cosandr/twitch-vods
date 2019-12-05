@@ -59,11 +59,6 @@ class Check():
             v.addHandler(fh)
             v.addHandler(ch)
         self.rec_log.info("Twitch recorder started with PID %d", os.getpid())
-        # Load persistent transcode file
-        if os.path.exists(TRANSCODE_FILE):
-            with open(TRANSCODE_FILE, 'r', encoding='utf-8') as fr:
-                self.ffmpeg_src = json.load(fr)
-            self.rec_log.info(f"{len(self.ffmpeg_src)} pending transcodes loaded.")
         self.ffmpeg_task = self.loop.create_task(self.wait_transcode())
     
     async def init_sess(self):
@@ -73,6 +68,8 @@ class Check():
     async def close_sess(self):
         await self.aio_sess.close()
         self.rec_log.info(F"aiohttp session closed.")
+        self.ffmpeg_task.cancel()
+        await self.ffmpeg_task
     
     async def timer(self, timeout=None):
         self.unmark_busy()
@@ -82,34 +79,48 @@ class Check():
         await asyncio.sleep(timeout)
         self.check_en.set()
 
+    async def aio_request(self, url, headers, params):
+        data = None
+        try:
+            async with self.aio_sess.get(url=url, headers=headers, params=params) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                else:
+                    self.rec_log.error(F"Invalid response {resp.status}, retrying in {self.timeout}s.")
+                    self.loop.create_task(self.timer())
+                    self.check_en.clear()
+        except Exception as e:
+            self.rec_log.error(F"aiohttp error {str(e)}, retrying in {self.timeout}s.")
+            self.loop.create_task(self.timer())
+            self.check_en.clear()
+        return data
+
     async def check_if_live(self):
         headers = {'Client-ID': self.client_id}
         url = "https://api.twitch.tv/helix/streams"
         params = {'user_login': self.user}
-        while True:
-            await self.check_en.wait()
-            data = None
-            try:
-                async with self.aio_sess.get(url=url, headers=headers, params=params) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                    else:
-                        self.rec_log.error(F"Invalid response {resp.status}, retrying in {self.timeout}s.")
-                        self.loop.create_task(self.timer())
-                        self.check_en.clear()
-            except Exception as e:
-                self.rec_log.error(F"aiohttp error {str(e)}, retrying in {self.timeout}s.")
-                self.loop.create_task(self.timer())
-                self.check_en.clear()
-            if data and (len(data['data']) != 0) and (data['data'][0]['type'] == 'live'):
-                self.title = data['data'][0]['title'].replace("/", "")
-                self.start_dt = datetime.now()
-                self.rec_log.debug(F"{self.user} is live: {self.title}")
-                await self.record()
-            else:
-                self.rec_log.debug(F"{self.user} is offline, retrying in {self.timeout}s.")
-                self.loop.create_task(self.timer())
-                self.check_en.clear()
+        await self.check_en.wait()
+        data = await self.aio_request(url, headers, params)
+        if not data or (len(data['data']) == 0) or (data['data'][0]['type'] != 'live'):
+            self.rec_log.debug(F"{self.user} is offline, retrying in {self.timeout}s.")
+            self.loop.create_task(self.timer())
+            self.check_en.clear()
+            return
+        # Check if hosting
+        url = "https://tmi.twitch.tv/hosts"
+        params = {'include_logins': 1, 'host': data['data'][0]['user_id']}
+        data_host = await self.aio_request(url=url, headers=None, params=params)
+        return
+        host_login = data_host['hosts'][0].get('target_login')
+        if host_login:
+            self.rec_log.debug(F"{self.user} is live but hosting {host_login}, retrying in 10m.")
+            self.loop.create_task(self.timer(600))
+            self.check_en.clear()
+            return
+        self.title = data['data'][0]['title'].replace("/", "")
+        self.start_dt = datetime.now()
+        self.rec_log.debug(F"{self.user} is live: {self.title}")
+        await self.record()
 
     async def record(self):
         self.check_en.clear()
@@ -159,6 +170,11 @@ class Check():
         self.loop.create_task(self.timer())
 
     async def wait_transcode(self):
+        # Load persistent transcode file
+        if os.path.exists(TRANSCODE_FILE):
+            with open(TRANSCODE_FILE, 'r', encoding='utf-8') as fr:
+                self.ffmpeg_src = json.load(fr)
+            self.t_log.info(f"{len(self.ffmpeg_src)} pending transcodes loaded.")
         try:
             while True:
                 if self.kill_flag:
@@ -190,10 +206,11 @@ class Check():
                     self.ffmpeg_src[conv_idx]['status'] = 'transcode-fail'
         except asyncio.CancelledError:
             self.t_log.info(f"Transcode task cancelled")
+            pass
 
         with open(TRANSCODE_FILE, 'w', encoding='utf-8') as fw:
             json.dump(self.ffmpeg_src, fw, indent=1, ensure_ascii=False)
-            self.t_log.info(f"{len(self.ffmpeg_src)} pending transcodes written.")
+        self.t_log.info(f"{len(self.ffmpeg_src)} pending transcodes written.")
 
     def delete_raw(self, raw_fp: str, proc_fp: str):
         if not os.path.exists(proc_fp):
@@ -225,16 +242,20 @@ class Check():
             raise Exception(F"{exec_name} exit code: {p.returncode}")
 
     async def watch(self, stream, proc, logger, prefix=''):
-        async for line in stream:
-            tmp = line.decode()
-            if 'Opening stream' in tmp:
-                logger.info(F"Stream opened.")
-            elif 'Stream ended' in tmp:
-                logger.info(F"Stream ended.")
-            elif prefix == 'STDERR:':
-                logger.warning(F"[{proc}] {prefix} {tmp}")
-            else:
-                logger.debug(F"[{proc}] {prefix} {tmp}")
+        try:
+            async for line in stream:
+                tmp = line.decode()
+                if 'Opening stream' in tmp:
+                    logger.info(F"Stream opened.")
+                elif 'Stream ended' in tmp:
+                    logger.info(F"Stream ended.")
+                elif prefix == 'STDERR:':
+                    logger.warning(F"[{proc}] {prefix} {tmp}")
+                else:
+                    logger.debug(F"[{proc}] {prefix} {tmp}")
+        except ValueError as e:
+            logger.warning(F"[{proc}] STREAM: {str(e)}")
+            pass
 
     def mark_busy(self):
         if not os.path.exists(cfg.BUSY):
