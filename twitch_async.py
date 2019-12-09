@@ -17,8 +17,8 @@ import config as cfg
 
 # Run in shell
 # ffprobe -v quiet -print_format json -show_streams -sexagesimal ${IN}
-# IN= ;OUT= ;ffmpeg -i "${IN}" -c:v libx265 -x265-params crf=23:pools=4 -preset:v medium -c:a aac -y -hide_banner "${OUT}"
-# IN= ;OUT= ;ffmpeg -i "${IN}" -c:v libx265 -x265-params crf=23:pools=4 -preset:v medium -c:a aac -y -progress - -nostats -hide_banner "${OUT}"
+# IN= ;OUT= ;ffmpeg -i "${IN}" -c:v libx265 -x265-params crf=23:pools=4 -preset:v fast -c:a aac -y -hide_banner "${OUT}"
+# IN= ;OUT= ;ffmpeg -i "${IN}" -c:v libx265 -x265-params crf=23:pools=4 -preset:v faster -c:a aac -y -progress - -nostats -hide_banner "${OUT}"
 """
 OUTPUT OF -progress - -nostats
 frame=61
@@ -34,6 +34,13 @@ drop_frames=0
 speed=1.68x
 progress=continue
 """
+# export LIBVA_DRIVER_NAME=iHD
+# HEVC hwaccel
+# https://video-weaver.osl01.hls.ttvnw.net/v1/playlist/CqwDtKw65qy9BU-RX4ohvlZ0hmj5lVd65QypMz1JdddORyVd5CoWByt9Gr1K5pnNF7GjcOLDP0ad-o_5szrMmtAFpDwe2KCz41rTBye1QK9DRdEbm14NzY-87W-I8q123TzX67Lc1ZEfy__ZpsLHPKsSNTZu6XEvkiFu9f5bFu5euQi5NXrm6qUvdZvlObh3y_g33E-_Z-TN3txsXZu7lfVpo-g1SvUdoel000OKH1Sh4GGYzwMTrwygHN5MuOt51i2Nbro-Wa7h-4O5nYyJyeKqzAuM9H0462la-1BjE-d0KkvPpUs7NGFpChqGZ7AEiJHi873uPJ8FnyskDqOMjpYdTYRp_FuDBNxBBIaOlQcy3zRLXrvjvrieQUVvjxvJw1XYYfISzSrb4xeRW_NXAFZOB6T6rz8RAcdqnpyeN4efN6fF6_efoVINDd2rH9OmYeqo1CuuNHaEVGx8GhJOivQNirN8_wF0TwjSyTVM504foL66JpB-4hnOCllyOyofVmck_nbdzGVwrGHhujIvJzC1HwfN-81ci1MI4NTnmY_4fpkYT5HYwb2q7XeRfqkSECybTd8lqxdVVsjAU1NO1CwaDM1CTKYy1fz8GFIvXw.m3u8
+# ffmpeg -vaapi_device /dev/dri/renderD128 -i "${IN}" -vf 'format=nv12,hwupload' -c:v h264_vaapi -qp 18 output.mp4
+# ffmpeg -vaapi_device /dev/dri/renderD128 -i "${IN}" -vf 'format=nv12,hwupload' -c:v hevc_vaapi -qp 23 output.mkv
+# ffmpeg -vaapi_device /dev/dri/renderD128 -i "${IN}" -vf 'format=nv12,hwupload' -c:v vp9_vaapi -b:v 5M output.webm
+# ffmpeg -init_hw_device qsv=hw -filter_hw_device hw -i "${IN}" -vf hwupload=extra_hw_frames=64,format=qsv -c:v h264_qsv -q 25 output.mp4
 
 FFMPEG_HEVC = 'ffmpeg -i "{0}" -c:v libx265 -x265-params crf=23:pools=4 -preset:v fast -c:a aac -y -progress - -nostats -hide_banner "{1}"'
 FFMPEG_COPY = 'ffmpeg -i "{0}" -err_detect ignore_err -f mp4 -c:a aac -c:v copy -y -progress - -nostats -hide_banner "{1}"'
@@ -217,6 +224,7 @@ class Check():
                         await self.delete_raw(self.ffmpeg_src[conv_idx]['src'], self.ffmpeg_src[conv_idx]['dst'])
                         del self.ffmpeg_src[conv_idx]
                     except Exception as e:
+                        self.t_log.error(f"Delete failed: {str(e)}")
                         self.ffmpeg_src[conv_idx]['status'] = 'delete-fail'
                 except Exception as e:
                     self.t_log.error(f"Transcode failed: {str(e)}")
@@ -261,8 +269,16 @@ class Check():
         # Find duration
         metadata = json.loads(stdout.decode())
         for stream in metadata['streams']:
-            if stream['codec_type'] == 'video':
-                return self.parse_duration(stream['duration'])
+            if stream['codec_type'] != 'video':
+                continue
+            # Good for H264
+            dur = stream.get('duration')
+            # H265
+            if dur is None and stream.get('tags') is not None:
+                dur = stream['tags'].get('DURATION')
+            if dur is None:
+                return
+            return self.parse_duration(dur)
         return
 
     async def run_cmd(self, cmd: str, logger: logging.Logger):
@@ -295,12 +311,11 @@ class Check():
     @staticmethod
     def parse_duration(time_str: str):
         """Parse HH:MM:SS.MICROSECONDS to timedelta"""
-        try:
-            dt = datetime.strptime(time_str, '%H:%M:%S.%f')
-            td = timedelta(hours=dt.hour, minutes=dt.minute, seconds=dt.second, microseconds=dt.microsecond)
-            return td
-        except Exception:
-            return None
+        m = re.match(r'(?P<h>\d{1,2}):(?P<m>\d{2}):(?P<s>\d{2})\.(?P<ms>\d+)', time_str)
+        if m is None:
+            return
+        td = timedelta(hours=int(m.group('h')), minutes=int(m.group('m')), seconds=int(m.group('s')), microseconds=int(m.group('ms')))
+        return td
 
     def mark_busy(self):
         if not os.path.exists(cfg.BUSY):
