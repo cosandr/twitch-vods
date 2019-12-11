@@ -3,3 +3,4 @@ config.py
 log/
 transcode.json
 .vscode/
+.python-version

@@ -45,7 +45,13 @@ progress=continue
 FFMPEG_HEVC = 'ffmpeg -i "{0}" -c:v libx265 -x265-params crf=23:pools=4 -preset:v fast -c:a aac -y -progress - -nostats -hide_banner "{1}"'
 FFMPEG_COPY = 'ffmpeg -i "{0}" -err_detect ignore_err -f mp4 -c:a aac -c:v copy -y -progress - -nostats -hide_banner "{1}"'
 TRANSCODE_FILE = 'transcode.json'
-BUSY_FILE = os.path.join(cfg.BUSY, cfg.NAME)
+RAW = os.getenv('PATH_RAW')
+PROC = os.getenv('PATH_PROC')
+BUSY = os.getenv('PATH_BUSY')
+if not RAW or not PROC or not BUSY:
+    print('Missing env vars')
+    exit(0)
+BUSY_FILE = os.path.join(BUSY, cfg.NAME)
 
 class Check():
     title = ''
@@ -152,12 +158,12 @@ class Check():
         no_space_title = re.sub(r'[^a-zA-Z0-9]+', '_', self.title)
         start_time_str = self.start_dt.strftime("%y%m%d-%H%M")
         rec_name = F"{start_time_str}_{self.user}_{no_space_title}"
-        raw_fp = os.path.join(cfg.RAW, f'{rec_name}.flv')
+        raw_fp = os.path.join(RAW, f'{rec_name}.flv')
         stream_url = F"twitch.tv/{self.user}"
         self.rec_log.info(F"Saving raw stream to {raw_fp}")
         cmd = F"streamlink {stream_url} --default-stream best -o {raw_fp} -l info"
         try:
-            await self.run_cmd(cmd, self.rec_log)
+            await self.run_cmd(cmd, self.rec_log, self.watch)
         except Exception as e:
             self.rec_log.error(F"Recording failed: {str(e)}")
             if not os.path.exists(raw_fp):
@@ -172,7 +178,7 @@ class Check():
         # Title without illegal NTFS characters
         win_title = re.sub(r'[<>:"\/\\|?*\n]+', '', self.title)
         conv_name = F"{start_time}_{win_title}"
-        proc_path = os.path.join(cfg.PROC, self.user)
+        proc_path = os.path.join(PROC, self.user)
         if not os.path.exists(proc_path):
             os.mkdir(proc_path)
         # Decide if we copy or transcode
@@ -219,7 +225,7 @@ class Check():
                 # Run copy/HEVC encode
                 try:
                     self.t_log.info(f"Running: {self.ffmpeg_src[conv_idx]['cmd']}")
-                    await self.run_cmd(self.ffmpeg_src[conv_idx]['cmd'], self.t_log)
+                    await self.run_cmd(self.ffmpeg_src[conv_idx]['cmd'], self.t_log, self.watch_ffmpeg)
                     try:
                         await self.delete_raw(self.ffmpeg_src[conv_idx]['src'], self.ffmpeg_src[conv_idx]['dst'])
                         del self.ffmpeg_src[conv_idx]
@@ -281,18 +287,20 @@ class Check():
             return self.parse_duration(dur)
         return
 
-    async def run_cmd(self, cmd: str, logger: logging.Logger):
+    @staticmethod
+    async def run_cmd(cmd: str, logger: logging.Logger, watch):
         exec_name = cmd.split(' ')[0]
         p = await asyncio.create_subprocess_shell(cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
         try:
-            await asyncio.gather(self.watch(p.stdout, exec_name, logger, prefix='STDOUT:'), self.watch(p.stderr, exec_name, logger, prefix='STDERR:'))
+            await asyncio.gather(watch(p.stdout, exec_name, logger, prefix='STDOUT:'), watch(p.stderr, exec_name, logger, prefix='STDERR:'))
         except Exception as e:
             logger.critical(f'stdout/err critical failure: {str(e)}')
         await p.wait()
         if p.returncode != 0:
             raise Exception(F"{exec_name} exit code: {p.returncode}")
 
-    async def watch(self, stream, proc, logger, prefix=''):
+    @staticmethod
+    async def watch(stream, proc, logger, prefix=''):
         try:
             async for line in stream:
                 tmp = line.decode()
@@ -309,6 +317,36 @@ class Check():
             pass
 
     @staticmethod
+    async def watch_ffmpeg(stream, proc, logger, prefix=''):
+        # Can use parse_duration to print every X seconds
+        log_dict = {}
+        try:
+            async for line in stream:
+                tmp = line.decode()
+                # Parse output
+                parsed = {
+                    'frame': tmp.split('frame='),
+                    'fps': tmp.split('fps='),
+                    'size': tmp.split('total_size='),
+                    'out_time': tmp.split('out_time=')
+                }
+                # Add found value to log_dict
+                for k, v in parsed.items():
+                    if len(v) > 1:
+                        try:
+                            log_dict[k] = float(v[1])
+                        except ValueError:
+                            log_dict[k] = v[1].replace('\n', '')
+                        break
+                # Print if we found all
+                if log_dict.keys() == parsed.keys():
+                    logger.info(f'[FFMPEG] frame {log_dict["frame"]:.0f}, {log_dict["fps"]:.2f} fps, time {log_dict["out_time"]}, size {log_dict["size"]/1e6:.1f}MB')
+                    log_dict.clear()
+        except ValueError as e:
+            logger.warning(F"[{proc}] STREAM: {str(e)}")
+            pass
+
+    @staticmethod
     def parse_duration(time_str: str):
         """Parse HH:MM:SS.MICROSECONDS to timedelta"""
         m = re.match(r'(?P<h>\d{1,2}):(?P<m>\d{2}):(?P<s>\d{2})\.(?P<ms>\d+)', time_str)
@@ -318,7 +356,7 @@ class Check():
         return td
 
     def mark_busy(self):
-        if not os.path.exists(cfg.BUSY):
+        if not os.path.exists(BUSY):
             return
         if not os.path.exists(BUSY_FILE):
             try:
@@ -327,7 +365,7 @@ class Check():
                 self.rec_log.error(f'Cannot create busy file: {str(e)}')
     
     def unmark_busy(self):
-        if not os.path.exists(cfg.BUSY):
+        if not os.path.exists(BUSY):
             return
         if os.path.exists(BUSY_FILE) and not self.trans_running and not self.check_en.is_set():
             try:
