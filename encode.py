@@ -47,8 +47,7 @@ class JobRecv():
     server = None
     job_keys = ['src', 'file_name', 'user']
 
-    def __init__(self, loop, logger, jobs: list, jobs_done:list, en: asyncio.Event):
-        self.loop = loop
+    def __init__(self, logger, jobs: list, jobs_done:list, en: asyncio.Event):
         self.logger = logger
         self.jobs = jobs
         self.jobs_done = jobs_done
@@ -56,7 +55,7 @@ class JobRecv():
 
     async def run(self):
         """Start deserialize"""
-        self.server = await asyncio.start_unix_server(self.deserialize, path=cfg.SOCK, loop=self.loop)
+        self.server = await asyncio.start_unix_server(self.deserialize, path=cfg.SOCK)
         self.logger.info(F"Socket at {self.server.sockets[0].getsockname()} started")
 
     async def close(self):
@@ -289,7 +288,7 @@ if __name__ == "__main__":
     jobs_done = read_jobs('jobs_done.json')
     ### Setup variables ###
     en = asyncio.Event()
-    recv = JobRecv(loop, recv_logger, jobs, jobs_done, en)
+    recv = JobRecv(recv_logger, jobs, jobs_done, en)
     encoder = Encoder(logger, jobs, jobs_done, en, dst_path)
     # Start receiver
     loop.run_until_complete(recv.run())
