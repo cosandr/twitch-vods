@@ -1,6 +1,6 @@
 __pycache__
 config.py
 log/
-transcode.json
+*.json
 .vscode/
 .python-version
