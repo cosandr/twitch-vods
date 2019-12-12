@@ -19,6 +19,7 @@ cat > $_install_path_rec <<EOF
 [Unit]
 Description=Records all RL twitch streams
 After=zfs-mount.service
+After=network.target
 ConditionPathExists=$_path_rec
 
 [Service]
