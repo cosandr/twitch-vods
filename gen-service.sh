@@ -79,9 +79,9 @@ Restart=on-failure
 WorkingDirectory=$_path_exec
 User=$_user
 Group=$_group
-Environment=DST_PATH=$_path_www
-Environment=CLIP_PATH=$_path_clips
-Environment=RL_PATH=$_path_enc/RichardLewisReports
+Environment=PATH_WWW=$_path_www
+Environment=PATH_SRC1=$_path_clips
+Environment=PATH_SRC2=$_path_enc/RichardLewisReports
 Environment=PATH=/opt/pyenv/versions/twitch/bin:/usr/bin:\$PATH
 ExecStart=bash -c "python uuid-gen.py"
 

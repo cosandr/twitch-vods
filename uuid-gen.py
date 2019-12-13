@@ -6,7 +6,15 @@ import logging
 import re
 import hashlib
 from datetime import datetime, timedelta
+from logging.handlers import RotatingFileHandler
 
+
+"""
+TODO:
+- Postgres is hardcoded
+- Paths are hardcoded
+- Socket connection to rec.py
+"""
 
 class Generator:
 
@@ -20,7 +28,13 @@ class Generator:
         self.check_paths = {"clips": clip_path, "rl": rl_path}
         self.logger = logging.getLogger('uuid')
         self.logger.setLevel(logging.DEBUG)
-        fh = logging.FileHandler(filename='uuid.log', encoding='utf-8', mode='w')
+        if not os.path.exists('log'):
+            os.mkdir('log')
+        fh = RotatingFileHandler(
+            filename=f'log/uuid.log',
+            maxBytes=1e6, backupCount=3,
+            encoding='utf-8', mode='a'
+        )
         fh.setLevel(logging.INFO)
         fh.setFormatter(logging.Formatter('%(asctime)s:%(levelname)s:%(name)s: %(message)s'))
         ch = logging.StreamHandler()
@@ -31,7 +45,7 @@ class Generator:
         self.logger.info("Generator started with PID %d", os.getpid())
 
     async def connect_psql(self):
-        self.conn = await asyncpg.connect(dsn="postgres://uuid_gen:penis@localhost:5432/web")
+        self.conn = await asyncpg.connect(dsn="postgres://uuid_gen:penis@localdocker:5432/web")
         self.logger.info("PSQL connected.")
 
     async def check_new_files(self):
@@ -145,7 +159,7 @@ class Generator:
         return md5.hexdigest()
 
 if __name__ == "__main__":
-    www_path, clip_path, rl_path = os.getenv('DST_PATH'), os.getenv('CLIP_PATH'), os.getenv('RL_PATH')
+    www_path, clip_path, rl_path = os.getenv('PATH_WWW'), os.getenv('PATH_SRC1'), os.getenv('PATH_SRC2')
     if not www_path or not clip_path or not rl_path:
         print(f'Missing env variables.')
         exit(1)
