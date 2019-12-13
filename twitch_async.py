@@ -157,7 +157,7 @@ class Check():
         self.rec_log.info(F"Saving raw stream to {raw_fp}")
         cmd = F"streamlink {stream_url} --default-stream best -o {raw_fp} -l info"
         try:
-            await self.run_cmd(cmd, self.rec_log)
+            await self.run_cmd(cmd, self.rec_log, self.watch)
         except Exception as e:
             self.rec_log.error(F"Recording failed: {str(e)}")
             if not os.path.exists(raw_fp):
@@ -219,7 +219,7 @@ class Check():
                 # Run copy/HEVC encode
                 try:
                     self.t_log.info(f"Running: {self.ffmpeg_src[conv_idx]['cmd']}")
-                    await self.run_cmd(self.ffmpeg_src[conv_idx]['cmd'], self.t_log)
+                    await self.run_cmd(self.ffmpeg_src[conv_idx]['cmd'], self.t_log, self.watch_ffmpeg)
                     try:
                         await self.delete_raw(self.ffmpeg_src[conv_idx]['src'], self.ffmpeg_src[conv_idx]['dst'])
                         del self.ffmpeg_src[conv_idx]
@@ -281,18 +281,20 @@ class Check():
             return self.parse_duration(dur)
         return
 
-    async def run_cmd(self, cmd: str, logger: logging.Logger):
+    @staticmethod
+    async def run_cmd(cmd: str, logger: logging.Logger, watch):
         exec_name = cmd.split(' ')[0]
         p = await asyncio.create_subprocess_shell(cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
         try:
-            await asyncio.gather(self.watch(p.stdout, exec_name, logger, prefix='STDOUT:'), self.watch(p.stderr, exec_name, logger, prefix='STDERR:'))
+            await asyncio.gather(watch(p.stdout, exec_name, logger, prefix='STDOUT:'), watch(p.stderr, exec_name, logger, prefix='STDERR:'))
         except Exception as e:
             logger.critical(f'stdout/err critical failure: {str(e)}')
         await p.wait()
         if p.returncode != 0:
             raise Exception(F"{exec_name} exit code: {p.returncode}")
 
-    async def watch(self, stream, proc, logger, prefix=''):
+    @staticmethod
+    async def watch(stream, proc, logger, prefix=''):
         try:
             async for line in stream:
                 tmp = line.decode()
@@ -304,6 +306,36 @@ class Check():
                     logger.warning(F"[{proc}] {prefix} {tmp}")
                 else:
                     logger.debug(F"[{proc}] {prefix} {tmp}")
+        except ValueError as e:
+            logger.warning(F"[{proc}] STREAM: {str(e)}")
+            pass
+
+    @staticmethod
+    async def watch_ffmpeg(stream, proc, logger, prefix=''):
+        # Can use parse_duration to print every X seconds
+        log_dict = {}
+        try:
+            async for line in stream:
+                tmp = line.decode()
+                # Parse output
+                parsed = {
+                    'frame': tmp.split('frame='),
+                    'fps': tmp.split('fps='),
+                    'size': tmp.split('total_size='),
+                    'out_time': tmp.split('out_time=')
+                }
+                # Add found value to log_dict
+                for k, v in parsed.items():
+                    if len(v) > 1:
+                        try:
+                            log_dict[k] = float(v[1])
+                        except ValueError:
+                            log_dict[k] = v[1].replace('\n', '')
+                        break
+                # Print if we found all
+                if log_dict.keys() == parsed.keys():
+                    logger.info(f'[FFMPEG] frame {log_dict["frame"]:.0f}, {log_dict["fps"]:.2f} fps, time {log_dict["out_time"]}, size {log_dict["size"]/1e6:.1f}MB')
+                    log_dict.clear()
         except ValueError as e:
             logger.warning(F"[{proc}] STREAM: {str(e)}")
             pass
