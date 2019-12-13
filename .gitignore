@@ -2,5 +2,6 @@ __pycache__
 config.py
 log/
 *.json
+*.sock
 .vscode/
 .python-version
