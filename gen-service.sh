@@ -7,13 +7,12 @@ if [[ $EUID -ne 0 ]]; then
    exit 1
 fi
 
-_install_path_rec="/etc/systemd/system/rl-rec.service"
-_install_path_enc="/etc/systemd/system/rl-enc.service"
 _user="andrei"
 _group="users"
-_path_exec="/home/andrei/git-projects/rl-vods"
+_path_exec="/srv/containers/twitch/src"
 _path_rec="/tank/media/twitch_raw"
-_path_enc="/tank/media/twitch"
+
+_install_path_rec="/etc/systemd/system/rl-rec.service"
 
 cat > $_install_path_rec <<EOF
 [Unit]
@@ -38,6 +37,9 @@ ExecStart=sh -c "python rec.py"
 WantedBy=multi-user.target
 EOF
 
+_install_path_enc="/etc/systemd/system/rl-enc.service"
+_path_enc="/tank/media/twitch"
+
 cat > $_install_path_enc <<EOF
 [Unit]
 Description=Encode Twitch stream recordings
@@ -58,8 +60,39 @@ ExecStart=sh -c "python encode.py"
 WantedBy=multi-user.target
 EOF
 
+_install_path_www="/etc/systemd/system/rl-www.service"
+_path_www="/var/www/main/clips"
+_path_clips="/tank/media/clips"
+
+cat > $_install_path_www <<EOF
+[Unit]
+Description=Generates symlinks to clips and RL vods
+After=postgresql-12.service
+After=zfs-mount.service
+Requires=postgresql-12.service
+ConditionPathExists=$_path_enc/RichardLewisReports
+ConditionPathExists=$_path_clips
+
+[Service]
+Type=simple
+Restart=on-failure
+WorkingDirectory=$_path_exec
+User=$_user
+Group=$_group
+Environment=DST_PATH=$_path_www
+Environment=CLIP_PATH=$_path_clips
+Environment=RL_PATH=$_path_enc/RichardLewisReports
+Environment=PATH=/opt/pyenv/versions/twitch/bin:/usr/bin:\$PATH
+ExecStart=bash -c "python uuid-gen.py"
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
 chmod 644 $_install_path_rec
 chmod 644 $_install_path_enc
+chmod 644 $_install_path_www
 systemctl daemon-reload
 cat $_install_path_rec
 cat $_install_path_enc
+cat $_install_path_www
