@@ -4,6 +4,6 @@ log/
 *.json
 *.sock
 .idea
-test*.png
+test/*.png
 .vscode/
 .python-version

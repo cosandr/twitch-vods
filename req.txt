@@ -1,3 +1,0 @@
-streamlink
-aiohttp
-asyncpg

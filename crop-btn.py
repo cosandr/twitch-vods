@@ -1,13 +1,12 @@
-import asyncio
 import logging
 import os
-from io import BytesIO
 from logging.handlers import RotatingFileHandler
 import time
-from typing import Optional
-from PIL import Image
+from typing import List
+
 import numpy as np
 import cv2
+from skimage.metrics import mean_squared_error, structural_similarity
 
 
 """
@@ -21,12 +20,8 @@ ffmpeg -i "$IN" -ss 30 -s 640x360 -qscale:v 10 -frames:v 1 -c:v png -f image2pip
 
 VIDEO_PATH = "Z:/media/twitch/RichardLewisReports/"
 
-class Cropper:
 
-    common_args = [
-        '-s', '640x360', '-c:v', 'png', '-frames:v', '1', '-f', 'image2pipe',
-        # '-v', 'warning', '-y', '-progress', '-', '-nostats', '-hide_banner',
-    ]
+class Cropper:
 
     check_areas = [
         # Big banner at the bottom
@@ -59,7 +54,7 @@ class Cropper:
         self.logger.addHandler(ch)
         fh = RotatingFileHandler(
             filename=f'log/cropper.log',
-            maxBytes=1e6, backupCount=3,
+            maxBytes=int(1e6), backupCount=3,
             encoding='utf-8', mode='a'
         )
         fh.setLevel(logging.DEBUG)
@@ -67,7 +62,8 @@ class Cropper:
         self.logger.addHandler(fh)
         self.logger.info("Video cropper started with PID %d", os.getpid())
         # Load reference frame data
-        self.ref = self._calc_block_avg(cv2.imread('test_cv2.png', cv2.IMREAD_GRAYSCALE))
+        self.ref = cv2.imread('crop-reference.png', cv2.IMREAD_GRAYSCALE)
+        self.ref_regions = self._crop_to_regions(self.ref)
 
     def _calc_block_avg(self, arr: np.ndarray) -> list:
         results = []
@@ -103,17 +99,54 @@ class Cropper:
 
     def is_start_wait(self, file: str, check_time: int) -> bool:
         """Return True is image is determined to be idle period before intro"""
-        # img = asyncio.run(self.extract_frame(TEST_FILE, check_time))
-        area_avg = self._calc_block_avg(self.cv2_extract_frame(file, seconds=check_time))
+        r_img = self._crop_to_regions(self.extract_frame(file, seconds=check_time))
         errors = []
-        for i in range(len(area_avg)):
-            if i > len(self.ref):
-                continue
-            errors.append(abs(area_avg[i]-self.ref[i]))
-        self.logger.debug('Errors [avg %s]: %s', np.average(errors), errors)
-        if np.average(errors) > 30:
+        for i in range(len(self.ref_regions)):
+            err = structural_similarity(self.ref_regions[i], r_img[i])
+            errors.append(err)
+        self.logger.debug('Similarity [avg %s]: %s', np.average(errors), errors)
+        if np.average(errors) < 0.6:
             return False
         return True
+
+    def _crop_to_regions(self, img: np.ndarray) -> List[np.ndarray]:
+        """Returns regions defined by check_areas"""
+        ret = []
+        for region in self.check_areas:
+            from_x = region['start'][0]
+            from_y = region['start'][1]
+            to_x = from_x + region['size'][0]
+            to_y = from_y + region['size'][1]
+            # Don't overflow
+            to_x = to_x if to_x < img.shape[1] else img.shape[1] - 1
+            to_y = to_y if to_y < img.shape[0] else img.shape[0] - 1
+            ret.append(img[from_y:to_y, from_x:to_x])
+        return ret
+
+    def test_compare(self):
+        for f in os.listdir('test'):
+            img = cv2.imread(f'test/{f}', cv2.IMREAD_GRAYSCALE)
+            start = time.perf_counter()
+            mse_err = mean_squared_error(self.ref, img)
+            mse_time = (time.perf_counter() - start)*1000
+            start = time.perf_counter()
+            ssim_err = structural_similarity(self.ref, img)
+            ssim_time = (time.perf_counter() - start)*1000
+            print('%s: MSE [%.2fms] %.2f, SSIM [%.2fms] %.2f'.format(f, mse_time, mse_err, ssim_time, ssim_err))
+
+    def test_compare_regions(self):
+        for f in os.listdir('test'):
+            img = cv2.imread(f'test/{f}', cv2.IMREAD_GRAYSCALE)
+            r_img = self._crop_to_regions(img)
+            for i in range(len(self.ref_regions)):
+                start = time.perf_counter()
+                mse_err = mean_squared_error(self.ref_regions[i], r_img[i])
+                mse_time = (time.perf_counter() - start)*1000
+                start = time.perf_counter()
+                ssim_err = structural_similarity(self.ref_regions[i], r_img[i])
+                ssim_time = (time.perf_counter() - start)*1000
+                print('%s region %d: MSE [%.2fms] %.2f, SSIM [%.2fms] %.2f' % (f, i, mse_time, mse_err, ssim_time, ssim_err))
+                i += 1
 
     def find_intro(self, file: str, test: int = 0) -> int:
         """Returns time in seconds where the intro starts"""
@@ -172,29 +205,7 @@ class Cropper:
             actual = self.find_intro('', test=val)
             print(f'Expected: {val}s, got {actual}s, diff {abs(actual-val)}s')
 
-    async def extract_frame(self, video_file: str, seconds: int) -> Optional[Image.Image]:
-        """Returns an Image from the video file at seconds"""
-        args = self.common_args.copy()
-        # Insert input
-        args.insert(0, '-i')
-        args.insert(1, video_file)
-        args.insert(2, '-ss')
-        args.insert(3, str(seconds))
-        # Append output file
-        args.append('-')
-        self.logger.debug('CMD: ffmpeg %s', ' '.join(args))
-        start = time.perf_counter()
-        p = await asyncio.create_subprocess_exec('ffmpeg', *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-        stdout, stderr = await p.communicate()
-        if p.returncode != 0:
-            print(f'ffmpeg failed: {stderr}')
-            return
-        buf = BytesIO(stdout)
-        img = Image.open(buf)
-        self.logger.debug('Opened %s image in %.2fms', img.size, (time.perf_counter()-start)*1000)
-        return img
-
-    def cv2_extract_frame(self, video_file: str, frame: int = 0, seconds: int = 0) -> np.ndarray:
+    def extract_frame(self, video_file: str, frame: int = 0, seconds: int = 0) -> np.ndarray:
         if not os.path.exists(video_file):
             raise FileNotFoundError(f'{video_file} not found')
         start = time.perf_counter()
@@ -209,12 +220,24 @@ class Cropper:
         greyscale = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         self.logger.debug('CV2 read frame %d/%d in %.2fms', frame, total_frames, (time.perf_counter()-start)*1000)
         greyscale = cv2.resize(greyscale, (640, 360), interpolation=cv2.INTER_LINEAR)
-        # cv2.imwrite('test_cv2.png', greyscale)
         return greyscale
+
+    def test_extract(self):
+        extract_from = {
+            '200122-2318_Return Of By The Numbers #102.mp4': {'actual': [1277], 'before': range(0, 1270, 300), 'after': range(1280, 3000, 300)},
+            '200124-2323_Return Of By The Numbers #104.mp4': {'actual': [722], 'before': range(0, 710, 300), 'after': range(730, 2000, 300)},
+            '200128-2320_Return Of By The Numbers #105.mp4': {'actual': [944], 'before': range(0, 940, 300), 'after': range(950, 3000, 300)},
+        }
+        for file, time_def in extract_from.items():
+            for name, times in time_def.items():
+                for t in times:
+                    arr = self.extract_frame(VIDEO_PATH+file, seconds=t)
+                    cv2.imwrite(f'test/{file.split("_", 1)[0]}_{name}_{t}.png', arr)
 
 
 if __name__ == "__main__":
     c = Cropper(tol=5)
-    # asyncio.run(c.extract_frame(test_file, 30))
-    # c.cv2_extract_frame(TEST_FILE, 100)
-    c.test_find_intro_artificial()
+    # c.test_find_intro_artificial()
+    c.test_find_intro()
+    # c.test_extract()
+    # c.test_compare_regions()

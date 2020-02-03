@@ -1,0 +1,6 @@
+streamlink
+aiohttp
+asyncpg
+scikit-image
+opencv-python-headless
+numpy
