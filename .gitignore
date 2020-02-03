@@ -3,5 +3,7 @@ config.py
 log/
 *.json
 *.sock
+.idea
+test*.png
 .vscode/
 .python-version
