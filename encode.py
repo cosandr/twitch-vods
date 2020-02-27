@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/usr/bin/env python3
 
 import asyncio
 import json
@@ -11,7 +11,7 @@ import traceback
 from logging.handlers import RotatingFileHandler
 
 import config as cfg
-from utils import parse_duration, read_video_info
+from utils import read_video_info, run_ffmpeg
 
 """
 ### Run in shell
@@ -34,6 +34,7 @@ speed=1.68x
 progress=continue
 """
 
+
 class JobRecv():
 
     """
@@ -47,7 +48,7 @@ class JobRecv():
     server = None
     job_keys = ['src', 'file_name', 'user']
 
-    def __init__(self, logger, jobs: list, jobs_done:list, en: asyncio.Event):
+    def __init__(self, logger, jobs: list, jobs_done: list, en: asyncio.Event):
         self.logger = logger
         self.jobs = jobs
         self.jobs_done = jobs_done
@@ -94,7 +95,7 @@ class JobRecv():
 
 
 class Encoder():
-    
+
     copy_args = [
         '-c:v', 'copy', '-f', 'mp4',
         '-c:a', 'aac',
@@ -115,9 +116,9 @@ class Encoder():
         self.dst_path = dst_path
         signal.signal(signal.SIGTERM, self.signal_handler)
 
-    def signal_handler(self, signal, frame):
+    def signal_handler(self, signalnum, frame):
         raise KeyboardInterrupt()
-    
+
     async def job_wait(self):
         await self.en.wait()
         # Clear if this is the last job
@@ -144,7 +145,7 @@ class Encoder():
         # Try to encode
         try:
             self.logger.info('Encoding %s -> %s', j['src'], out_fp)
-            await self.run(cmd)
+            await run_ffmpeg(logger=self.logger, args=cmd)
             done_status = f'Encoded: {out_fp}'
             self.logger.info(done_status)
         except Exception as e:
@@ -159,54 +160,6 @@ class Encoder():
         self.jobs_done.append({'name': j['file_name'], 'status': done_status})
         self.jobs.pop()
 
-    async def run(self, args: list):
-        self.logger.debug('CMD: ffmpeg %s', ' '.join(args))
-        p = await asyncio.create_subprocess_exec('ffmpeg', *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-        try:
-            await asyncio.gather(self.watch(p.stdout, prefix='STDOUT:'), self.watch(p.stderr, prefix='STDERR:'))
-        except Exception as e:
-            self.logger.critical(f'stdout/err critical failure: {str(e)}')
-        await p.wait()
-        if p.returncode != 0:
-            raise Exception(F"ffmpeg exit code: {p.returncode}")
-
-    async def watch(self, stream: asyncio.StreamReader, prefix=''):
-        print_every = 10
-        last_time = 0
-        log_dict = {}
-        try:
-            async for line in stream:
-                tmp = line.decode()
-                # Parse output
-                parsed = {
-                    'frame': tmp.split('frame='),
-                    'fps': tmp.split('fps='),
-                    'size': tmp.split('total_size='),
-                    'out_time': tmp.split('out_time=')
-                }
-                # Add found value to log_dict
-                for k, v in parsed.items():
-                    if len(v) > 1:
-                        try:
-                            log_dict[k] = float(v[1])
-                        except ValueError:
-                            log_dict[k] = v[1].replace('\n', '')
-                        break
-                if log_dict.keys() == parsed.keys():
-                    # Log every print_every seconds
-                    curr_time = parse_duration(log_dict['out_time'])
-                    if curr_time is not None:
-                        curr_time = curr_time.total_seconds()
-                    if (curr_time is None or abs(curr_time - last_time) >= print_every):
-                        self.logger.debug('frame %.0f, FPS %.2f, time %s, size %.1fMB',
-                            log_dict["frame"], log_dict["fps"], str(log_dict["out_time"]),
-                            log_dict["size"]/1e6)
-                        log_dict.clear()
-                        last_time = curr_time
-        except ValueError as e:
-            self.logger.warning('[ffmpeg] Stream Error: %s', str(e))
-            pass
-    
     async def delete_raw(self, raw_fp: str, proc_fp: str):
         if not os.path.exists(proc_fp):
             self.logger.critical('%s -> MISSING %s', raw_fp, proc_fp)
