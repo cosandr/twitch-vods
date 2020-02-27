@@ -12,6 +12,7 @@ from logging.handlers import RotatingFileHandler
 
 import config as cfg
 from utils import read_video_info, run_ffmpeg
+from crop import Cropper
 
 """
 ### Run in shell
@@ -45,7 +46,6 @@ class JobRecv():
     }
     """
 
-    server = None
     job_keys = ['src', 'file_name', 'user']
 
     def __init__(self, logger, jobs: list, jobs_done: list, en: asyncio.Event):
@@ -53,6 +53,7 @@ class JobRecv():
         self.jobs = jobs
         self.jobs_done = jobs_done
         self.en = en
+        self.server: asyncio.AbstractServer = None
 
     async def run(self):
         """Start deserialize"""
@@ -94,7 +95,7 @@ class JobRecv():
         self.en.set()
 
 
-class Encoder():
+class Encoder:
 
     copy_args = [
         '-c:v', 'copy', '-f', 'mp4',
@@ -114,6 +115,7 @@ class Encoder():
         self.jobs_done = jobs_done
         self.en = en
         self.dst_path = dst_path
+        self.cropper = Cropper()
         signal.signal(signal.SIGTERM, self.signal_handler)
 
     def signal_handler(self, signalnum, frame):
@@ -142,9 +144,18 @@ class Encoder():
         cmd.insert(1, j['src'])
         # Append output file
         cmd.append(out_fp)
+        self.logger.info('Encoding %s -> %s', j['src'], out_fp)
+        # Crop if BTN
+        if is_btn:
+            try:
+                intro_seconds = self.cropper.find_intro(j['src'])
+                cmd.insert(0, '-ss')
+                cmd.insert(1, intro_seconds)
+                self.logger.info('Trimming, starting at %d seconds', intro_seconds)
+            except Exception as e:
+                self.logger.error('Could not find intro seconds: %s', str(e))
         # Try to encode
         try:
-            self.logger.info('Encoding %s -> %s', j['src'], out_fp)
             await run_ffmpeg(logger=self.logger, args=cmd)
             done_status = f'Encoded: {out_fp}'
             self.logger.info(done_status)
@@ -204,7 +215,7 @@ def write_jobs(fp: str, jobs: list):
 
 if __name__ == "__main__":
     loop = asyncio.get_event_loop()
-    ### LOGGER ###
+    # --- LOGGER ---
     log_fmt = logging.Formatter('%(asctime)s:%(levelname)s:%(name)s: %(message)s')
     logger = logging.getLogger('encoder')
     recv_logger = logging.getLogger('jobrecv')
@@ -217,7 +228,7 @@ if __name__ == "__main__":
     ch.setFormatter(log_fmt)
     fh = RotatingFileHandler(
         filename=f'log/encoder.log',
-        maxBytes=1e6, backupCount=3,
+        maxBytes=int(1e6), backupCount=3,
         encoding='utf-8', mode='a'
     )
     fh.setLevel(logging.DEBUG)
@@ -227,7 +238,7 @@ if __name__ == "__main__":
     recv_logger.addHandler(fh)
     recv_logger.addHandler(ch)
     logger.info("Encoder started with PID %d", os.getpid())
-    ### Check destination path ###
+    # --- Check destination path ---
     dst_path = '.'
     env_path = os.getenv('PATH_PROC')
     if env_path:
@@ -236,10 +247,10 @@ if __name__ == "__main__":
         else:
             dst_path = env_path
     logger.info('Saving encoded files to %s', dst_path)
-    ### Read pending files ###
+    # ---Read pending files ---
     jobs = read_jobs('pending_jobs.json')
     jobs_done = read_jobs('jobs_done.json')
-    ### Setup variables ###
+    # --- Setup variables ---
     en = asyncio.Event()
     recv = JobRecv(recv_logger, jobs, jobs_done, en)
     encoder = Encoder(logger, jobs, jobs_done, en, dst_path)

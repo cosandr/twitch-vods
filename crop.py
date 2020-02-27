@@ -9,6 +9,9 @@ import numpy as np
 from skimage.metrics import structural_similarity
 
 
+from utils import run_ffmpeg
+
+
 class Cropper:
 
     check_areas = [
@@ -55,6 +58,16 @@ class Cropper:
             raise FileNotFoundError('Reference file not found')
         self.ref = cv2.imread(ref_file, cv2.IMREAD_GRAYSCALE)
         self.ref_regions = self._crop_to_regions(self.ref)
+
+    async def run_crop(self, file: str, out_file: str):
+        """Find intro start and crop out start idle period"""
+        # ffmpeg -ss 00:01:00 -i input.mp4 -c copy output.mp4
+        intro_seconds = self.find_intro(file=file)
+        args = ['-ss', str(intro_seconds), '-i', file, '-c', 'copy', out_file]
+        try:
+            await run_ffmpeg(logger=self.logger, args=args)
+        except Exception as e:
+            self.logger.error('Failed to trim %s from %d seconds: %s', file, intro_seconds, str(e))
 
     def is_start_wait(self, file: str, check_time: int) -> bool:
         """Return True is image is determined to be idle period before intro"""
@@ -113,7 +126,7 @@ class Cropper:
             num_iter += 1
             if num_iter >= max_iter:
                 break
-        self.logger.debug('Found intro in %.2fms [%d iterations]', (time.perf_counter()-start)*1000, num_iter)
+        self.logger.info('Found intro at %d in %.2fms [%d iterations]', curr_t, (time.perf_counter()-start)*1000, num_iter)
         return curr_t
 
     def extract_frame(self, video_file: str, frame: int = 0, seconds: int = 0) -> np.ndarray:

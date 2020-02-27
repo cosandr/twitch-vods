@@ -16,7 +16,8 @@ from aiohttp import ClientSession
 
 import config as cfg
 
-class Recorder():
+
+class Recorder:
     title = ''
     start_time = ''
     aio_sess = None
@@ -35,15 +36,15 @@ class Recorder():
 
     def signal_handler(self, signal, frame):
         raise KeyboardInterrupt()
-    
+
     async def init_sess(self):
         self.logger.info("aiohttp session initialized.")
         self.aio_sess = ClientSession()
-    
+
     async def close_sess(self):
         await self.aio_sess.close()
         self.logger.info("aiohttp session closed.")
-    
+
     async def timer(self, timeout=None):
         if timeout is None:
             timeout = self.timeout
