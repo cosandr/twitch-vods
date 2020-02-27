@@ -4,7 +4,7 @@ log/
 *.json
 *.sock
 .idea
-test/*.png
+test/frames
 test/log
 .vscode/
 .python-version

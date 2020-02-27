@@ -1,6 +1,7 @@
 import os
 import time
 import unittest
+import platform
 
 import cv2
 import numpy as np
@@ -8,21 +9,27 @@ from skimage.metrics import mean_squared_error, structural_similarity
 
 from crop import Cropper
 
-VIDEO_PATH = "Z:/media/twitch/RichardLewisReports/"
+if platform.system() == 'Windows':
+    VIDEO_PATH = "Z:/media/twitch/RichardLewisReports/"
+else:
+    VIDEO_PATH = "/mnt/sshfs/tank/media/twitch/RichardLewisReports/"
+
+FRAME_PATH = './frames'
 
 """
 Countdown start 12:33 (753)
 Intro at 15:43 (943)
 Starts at 16:17 (977)
 IN="/tank/media/twitch/RichardLewisReports/200128-2320_Return Of By The Numbers #105.mp4"
-ffmpeg -i "$IN" -ss 30 -s 640x360 -qscale:v 10 -frames:v 1 test_btn105_30s.png
+ffmpeg -ss 30 -i "$IN"  -s 640x360 -qscale:v 10 -frames:v 1 test_btn105_30s.png
 ffmpeg -i "$IN" -ss 30 -s 640x360 -qscale:v 10 -frames:v 1 -c:v png -f image2pipe -
 """
 
 
 class TestCrop(unittest.TestCase):
-    def setUp(self) -> None:
-        self.cropper = Cropper(tol=5, initial_gap=300, debug=0)
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.cropper = Cropper(tol=5, initial_gap=300, debug=0)
 
     def test_is_start_wait(self):
         expected_def = {
@@ -40,23 +47,25 @@ class TestCrop(unittest.TestCase):
                     self.assertEqual(expected, actual, f'{file} [{val}]')
 
     def test_compare(self):
-        for f in os.listdir('.'):
+        for f in os.listdir(FRAME_PATH):
             if not f.endswith('.png'):
                 continue
-            img = cv2.imread(f, cv2.IMREAD_GRAYSCALE)
+            fp = os.path.join(FRAME_PATH, f)
+            img = cv2.imread(fp, cv2.IMREAD_GRAYSCALE)
             start = time.perf_counter()
             mse_err = mean_squared_error(self.cropper.ref, img)
             mse_time = (time.perf_counter() - start)*1000
             start = time.perf_counter()
             ssim_err = structural_similarity(self.cropper.ref, img)
             ssim_time = (time.perf_counter() - start)*1000
-            print('%s: MSE [%.2fms] %.2f, SSIM [%.2fms] %.2f' % (f, mse_time, mse_err, ssim_time, ssim_err))
+            print('%s: MSE [%.2fms] %.2f, SSIM [%.2fms] %.2f' % (fp, mse_time, mse_err, ssim_time, ssim_err))
 
     def test_compare_regions(self):
-        for f in os.listdir('.'):
+        for f in os.listdir(FRAME_PATH):
             if not f.endswith('.png'):
                 continue
-            img = cv2.imread(f'./{f}', cv2.IMREAD_GRAYSCALE)
+            fp = os.path.join(FRAME_PATH, f)
+            img = cv2.imread(fp, cv2.IMREAD_GRAYSCALE)
             r_img = self.cropper._crop_to_regions(img)
             for i in range(len(self.cropper.ref_regions)):
                 start = time.perf_counter()
@@ -65,7 +74,7 @@ class TestCrop(unittest.TestCase):
                 start = time.perf_counter()
                 ssim_err = structural_similarity(self.cropper.ref_regions[i], r_img[i])
                 ssim_time = (time.perf_counter() - start)*1000
-                print('%s region %d: MSE [%.2fms] %.2f, SSIM [%.2fms] %.2f' % (f, i, mse_time, mse_err, ssim_time, ssim_err))
+                print('%s region %d: MSE [%.2fms] %.2f, SSIM [%.2fms] %.2f' % (fp, i, mse_time, mse_err, ssim_time, ssim_err))
                 i += 1
 
     def test_find_intro(self):
@@ -102,7 +111,8 @@ class TestCrop(unittest.TestCase):
             for name, times in time_def.items():
                 for t in times:
                     arr = self.cropper.extract_frame(VIDEO_PATH+file, seconds=t)
-                    cv2.imwrite(f'test/{file.split("_", 1)[0]}_{name}_{t}.png', arr)
+                    fp = os.path.join(FRAME_PATH, f'{file.split("_", 1)[0]}_{name}_{t}.png')
+                    cv2.imwrite(fp, arr)
 
 
 if __name__ == '__main__':
