@@ -116,6 +116,7 @@ class Encoder:
         self.en = en
         self.dst_path = dst_path
         self.cropper = Cropper()
+        self.was_trimmed = False
         signal.signal(signal.SIGTERM, self.signal_handler)
 
     def signal_handler(self, signalnum, frame):
@@ -127,6 +128,7 @@ class Encoder:
         if len(self.jobs) == 1:
             self.en.clear()
         j = self.jobs[-1]
+        self.was_trimmed = False
         # Create folder from username if needed
         out_path = os.path.join(self.dst_path, j['user'])
         if not os.path.exists(out_path):
@@ -152,6 +154,7 @@ class Encoder:
                 cmd.insert(0, '-ss')
                 cmd.insert(1, intro_seconds)
                 self.logger.info('Trimming, starting at %d seconds', intro_seconds)
+                self.was_trimmed = True
             except Exception as e:
                 self.logger.error('Could not find intro seconds: %s', str(e))
         # Try to encode
@@ -172,6 +175,9 @@ class Encoder:
         self.jobs.pop()
 
     async def delete_raw(self, raw_fp: str, proc_fp: str):
+        if self.was_trimmed:
+            self.logger.info('%s was trimmed, will not delete')
+            raise Exception('Video was trimmed')
         if not os.path.exists(proc_fp):
             self.logger.critical('%s -> MISSING %s', raw_fp, proc_fp)
             raise FileNotFoundError(proc_fp)
