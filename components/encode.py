@@ -12,7 +12,7 @@ from logging.handlers import RotatingFileHandler
 
 import config as cfg
 from utils import read_video_info, run_ffmpeg
-from crop import Cropper
+from .crop import Cropper
 
 """
 ### Run in shell
@@ -36,7 +36,7 @@ progress=continue
 """
 
 
-class JobRecv():
+class JobRecv:
 
     """
     JOB = {

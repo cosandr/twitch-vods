@@ -1,13 +1,13 @@
-import uuid
-import os
 import asyncio
-import asyncpg
-import logging
-import re
 import hashlib
+import logging
+import os
+import re
+import uuid
 from datetime import datetime, timedelta
 from logging.handlers import RotatingFileHandler
 
+import asyncpg
 
 """
 TODO:
@@ -16,14 +16,11 @@ TODO:
 - Socket connection to rec.py
 """
 
+
 class Generator:
-
-    link_path = None
-    check_paths = None
-    uuid_dict = {}
-    conn = None
-
     def __init__(self, www_path, clip_path, rl_path):
+        self.uuid_dict = {}
+        self.conn: asyncpg.Connection = None
         self.link_path = www_path
         self.check_paths = {"clips": clip_path, "rl": rl_path}
         self.logger = logging.getLogger('uuid')
@@ -32,7 +29,7 @@ class Generator:
             os.mkdir('log')
         fh = RotatingFileHandler(
             filename=f'log/uuid.log',
-            maxBytes=1e6, backupCount=3,
+            maxBytes=int(1e6), backupCount=3,
             encoding='utf-8', mode='a'
         )
         fh.setLevel(logging.INFO)
@@ -86,8 +83,8 @@ class Generator:
         async with self.conn.transaction():
             for vid_type, dict_list in self.uuid_dict.items():
                 for item in dict_list:
-                    q = "INSERT INTO uuids (type, filename, uuid, md5, created) VALUES ($1, $2, $3, $4, $5)" + \
-                        "ON CONFLICT (md5) DO UPDATE SET filename=$2, uuid=$3"
+                    q = ("INSERT INTO uuids (type, filename, uuid, md5, created) VALUES ($1, $2, $3, $4, $5)"
+                         "ON CONFLICT (md5) DO UPDATE SET filename=$2, uuid=$3")
                     await self.conn.execute(q, vid_type, item['filename'], item['uuid'], item['md5'], item['created'])
         self.logger.info("Links added to SQL table")
         # Delete entries which do not exist anymore.
@@ -105,8 +102,8 @@ class Generator:
                         os.symlink(os.path.join(v, file), tmp_link)
                         md5 = self.get_md5(os.path.join(v, file))
                         async with self.conn.transaction():
-                            q = "INSERT INTO uuids (type, filename, uuid, md5, created) VALUES ($1, $2, $3, $4, $5)" + \
-                                "ON CONFLICT (md5) DO UPDATE SET filename=$2"
+                            q = ("INSERT INTO uuids (type, filename, uuid, md5, created) VALUES ($1, $2, $3, $4, $5)"
+                                 "ON CONFLICT (md5) DO UPDATE SET filename=$2")
                             await self.conn.execute(q, k, file[:-4], tmp_uuid, md5, created_dt)
                         self.logger.info("New %s %s added.", k.upper(), file[:-4])
                         self.uuid_dict[k].append({"filename": file[:-4], "uuid": tmp_uuid, "created": created_dt, "md5": md5})
@@ -131,13 +128,13 @@ class Generator:
 
     def get_datetime(self, path, file):
         # match = re.search(r'\d{2}\-\d{2}\-\d{2}\_\d{4}', file)
-        match = re.search(r'\d{6}\-\d{4}', file)
+        match = re.search(r'\d{6}-\d{4}', file)
         if match is None:
             self.logger.debug(F"{file} doesn't contain timestamp, fallback to OS modified time.")
             return datetime.utcfromtimestamp(os.path.getmtime(os.path.join(path, file)))
         # return datetime.strptime(match.group(), "%d-%m-%y_%H%M")
         return datetime.strptime(match.group(), "%y%m%d-%H%M")
-    
+
     def rename_rl(self):
         for file in os.listdir(self.check_paths['rl']):
             if file.endswith('.mp4'):
@@ -149,6 +146,7 @@ class Generator:
                     new_name = F"{new_time}_{file_title}.mp4"
                     os.rename(os.path.join(self.check_paths['rl'], file),
                               os.path.join(self.check_paths['rl'], new_name))
+
     @staticmethod
     def get_md5(file):
         md5 = hashlib.md5()
@@ -157,6 +155,7 @@ class Generator:
             md5.update(data)
 
         return md5.hexdigest()
+
 
 if __name__ == "__main__":
     www_path, clip_path, rl_path = os.getenv('PATH_WWW'), os.getenv('PATH_SRC1'), os.getenv('PATH_SRC2')

@@ -8,7 +8,6 @@ import cv2
 import numpy as np
 from skimage.metrics import structural_similarity
 
-
 from utils import run_ffmpeg
 
 
@@ -53,7 +52,7 @@ class Cropper:
         self.logger.addHandler(fh)
         self.logger.info("Video cropper started with PID %d", os.getpid())
         # Load reference frame data
-        ref_file = 'crop-reference.png'
+        ref_file = 'data/crop-reference.png'
         if not os.path.exists(ref_file):
             raise FileNotFoundError('Reference file not found')
         self.ref = cv2.imread(ref_file, cv2.IMREAD_GRAYSCALE)

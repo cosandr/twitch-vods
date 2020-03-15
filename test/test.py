@@ -1,21 +1,17 @@
 #!/usr/bin/python3
 
-import logging
 import asyncio
-import platform
-import traceback
-import sys
-import json
+import logging
 import os
+import platform
 import re
+import sys
+import traceback
 from datetime import datetime, timedelta
 from typing import List
 
-from rec import Recorder
-from crop import Cropper
-from utils import read_video_info, read_video_info_cv2
-
-import config as cfg
+from components import Cropper, Recorder
+from utils import read_video_info_cv2
 
 FFMPEG_COPY = '-i {0} -err_detect ignore_err -f mp4 -c:a aac -c:v copy -y -progress - -nostats -hide_banner {1}'
 FFMPEG_HEVC = 'ffmpeg -i "{0}" -c:v libx265 -x265-params crf=23:pools=4 -preset:v fast -c:a aac -v warning -y -progress - -nostats -hide_banner "{1}"'
@@ -77,7 +73,7 @@ async def watch(stream: asyncio.StreamReader, proc, logger, prefix=''):
 
 
 def get_stream_url(url: str):
-    from streamlink import Streamlink, StreamError, PluginError, NoPluginError
+    from streamlink import Streamlink, PluginError, NoPluginError
     # Create the Streamlink session
     streamlink = Streamlink()
 

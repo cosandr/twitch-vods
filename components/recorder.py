@@ -1,14 +1,13 @@
 #!/usr/bin/python3
 
 import asyncio
-import json
 import logging
 import os
+import pickle
 import re
+import signal
 import sys
 import traceback
-import pickle
-import signal
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
 
