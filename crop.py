@@ -144,4 +144,5 @@ class Cropper:
         greyscale = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         self.logger.debug('CV2 read frame %d/%d in %.2fms', frame, total_frames, (time.perf_counter()-start)*1000)
         greyscale = cv2.resize(greyscale, (640, 360), interpolation=cv2.INTER_LINEAR)
+        cap.release()
         return greyscale

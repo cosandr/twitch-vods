@@ -18,10 +18,7 @@ import config as cfg
 
 
 class Recorder:
-    title = ''
-    start_time = ''
-    aio_sess = None
-    ended_ok = False
+    time_fmt = '%y%m%d-%H%M'
 
     def __init__(self, loop: asyncio.BaseEventLoop, logger, client_id: str, user: str, timeout: int, raw_path: str):
         self.loop = loop
@@ -32,9 +29,13 @@ class Recorder:
         self.raw_path = raw_path
         self.check_en = asyncio.Event()
         self.check_en.set()
+        self.title = ''
+        self.start_time = ''
+        self.aio_sess = None
+        self.ended_ok = False
         signal.signal(signal.SIGTERM, self.signal_handler)
 
-    def signal_handler(self, signal, frame):
+    def signal_handler(self, signalnum, frame):
         raise KeyboardInterrupt()
 
     async def init_sess(self):
@@ -96,7 +97,7 @@ class Recorder:
     async def record(self):
         self.check_en.clear()
         no_space_title = re.sub(r'[^a-zA-Z0-9]+', '_', self.title)
-        start_time_str = self.start_dt.strftime("%y%m%d-%H%M")
+        start_time_str = self.start_dt.strftime(self.time_fmt)
         rec_name = F"{start_time_str}_{self.user}_{no_space_title}"
         raw_fp = os.path.join(self.raw_path, f'{rec_name}.flv')
         stream_url = F"twitch.tv/{self.user}"
@@ -114,7 +115,7 @@ class Recorder:
         await self.post_record(raw_fp)
 
     async def post_record(self, raw_fp: str):
-        start_time = self.start_dt.strftime("%y%m%d-%H%M")
+        start_time = self.start_dt.strftime(self.time_fmt)
         # Title without illegal NTFS characters
         win_title = re.sub(r'[<>:"\/\\|?*\n]+', '', self.title)
         conv_name = F"{start_time}_{win_title}"
@@ -161,7 +162,7 @@ class Recorder:
 
 
 if __name__ == '__main__':
-    ### Logger ###
+    # --- Logger ---
     log_fmt = logging.Formatter('%(asctime)s:%(levelname)s:%(name)s: %(message)s')
     logger = logging.getLogger('recorder')
     logger.setLevel(logging.DEBUG)
@@ -172,7 +173,7 @@ if __name__ == '__main__':
     ch.setFormatter(log_fmt)
     fh = RotatingFileHandler(
         filename=f'log/recorder.log',
-        maxBytes=1e6, backupCount=3,
+        maxBytes=int(1e6), backupCount=3,
         encoding='utf-8', mode='a'
     )
     fh.setLevel(logging.DEBUG)

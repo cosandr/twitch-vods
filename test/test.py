@@ -2,13 +2,18 @@
 
 import logging
 import asyncio
+import platform
 import traceback
 import sys
 import json
 import os
+import re
+from datetime import datetime, timedelta
+from typing import List
 
 from rec import Recorder
 from crop import Cropper
+from utils import read_video_info, read_video_info_cv2
 
 import config as cfg
 
@@ -116,8 +121,59 @@ def read_env():
             use_vars[name] = default
 
 
+async def find_concat(logger: logging.Logger, path: str, use_mtime: bool = True) -> List[str]:
+    """Find files which should be concatenated"""
+    # ffmpeg -f concat -safe 0 -i concat.txt -c copy output.mp4
+    re_time = re.compile(r'\d{6}-\d{4}')
+    tol = timedelta(minutes=30).total_seconds()
+    ret = []
+    tmp = []
+    prev_name = ''
+    prev_end = datetime.now()
+    for f in sorted(os.listdir(path)):
+        m = re_time.search(f)
+        if not m:
+            logger.warning('Could not extract time string from %s', f)
+            continue
+        file_name, _ = os.path.splitext(f)
+        curr_name = file_name.split('_', 1)[1]
+        if curr_name != prev_name:
+            logger.debug('Name mismatch %s != %s', curr_name, prev_name)
+            prev_name = curr_name
+            tmp = [curr_name]
+            continue
+        fp = os.path.join(path, f)
+        start_dt = datetime.strptime(m.group(), Recorder.time_fmt)
+        if use_mtime:
+            curr_end = datetime.fromtimestamp(os.path.getmtime(fp))
+        else:
+            # curr_dur = await read_video_info(fp, logger)
+            # curr_end = start_dt + curr_dur
+            curr_dur = read_video_info_cv2(fp)
+            curr_end = start_dt + curr_dur
+        logger.debug('%s ended at about %s', file_name, str(curr_end))
+        time_diff = start_dt - prev_end
+        time_diff_sec = abs(time_diff.total_seconds())
+        if time_diff_sec <= tol:
+            tmp.append(f)
+        elif len(tmp) == 1:
+            tmp.clear()
+        elif len(tmp) > 1:
+            logger.info('Found %d to concat', len(tmp))
+            concat_str = ''
+            for t in tmp:
+                concat_str += f"file '{t}'\n"
+            logger.debug('%s', concat_str)
+            ret.append(concat_str)
+            tmp.clear()
+        prev_end = curr_end
+        prev_name = curr_name
+    return ret
+
+
 if __name__ == "__main__":
     logger = logging.getLogger('test')
+    logger.setLevel(logging.DEBUG)
     ch = logging.StreamHandler()
     ch.setLevel(logging.DEBUG)
     logger.addHandler(ch)
@@ -130,11 +186,17 @@ if __name__ == "__main__":
     # args_streamlink = STREAMLINK_LIST.format(url, 'stream.flv').split(' ')
     # args_stream = FFMPEG_COPY.format(get_stream_url(url), 'stream.mp4').split(' ')
     crop = Cropper(debug=2)
-    in_file = '/tank/media/twitch/RichardLewisReports/200220-2246_Return Of By The Numbers #108.mp4'
-    out_file = '/tank/media/twitch_raw/test.mp4'
+    media_path = '/tank/media'
+    if platform.system() == 'Windows':
+        media_path = 'Z:/media'
+    elif platform.node() != 'DreSRV':
+        media_path = f'/mnt/sshfs{media_path}'
+    in_file = f'{media_path}/twitch/RichardLewisReports/200220-2246_Return Of By The Numbers #108.mp4'
+    out_file = f'{media_path}/twitch_raw/test.mp4'
     try:
         # loop.run_until_complete(crop.run_crop(in_file, out_file))
-        crop.find_intro('/tank/media/twitch/RichardLewisReports/200219-2045_Soviet Bloviate.mkv')
+        # crop.find_intro('/tank/media/twitch/RichardLewisReports/200219-2045_Soviet Bloviate.mkv')
+        loop.run_until_complete(find_concat(logger, f'{media_path}/twitch/RichardLewisReports', use_mtime=False))
     except KeyboardInterrupt:
         print(F"Keyboard interrupt, exit.")
     except Exception as error:

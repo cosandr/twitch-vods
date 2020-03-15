@@ -4,6 +4,11 @@ import logging
 import re
 from datetime import timedelta
 
+try:
+    import cv2
+except ImportError:
+    print('OpenCV not available')
+
 
 def parse_duration(time_str: str):
     """Parse HH:MM:SS.MICROSECONDS to timedelta"""
@@ -40,6 +45,18 @@ async def read_video_info(vid_fp: str, logger=None):
             return
         return parse_duration(dur)
     return
+
+
+def read_video_info_cv2(vid_fp: str):
+    """Returns video duration (as timedelta) using OpenCV"""
+    cap = cv2.VideoCapture(vid_fp)
+    total_frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+    total_seconds = int(total_frames / cap.get(cv2.CAP_PROP_FPS))
+    cap.release()
+    return timedelta(seconds=total_seconds)
+    # cap.set(cv2.CAP_PROP_POS_AVI_RATIO, 1)
+    # total_ms = cap.get(cv2.CAP_PROP_POS_MSEC)
+    # return timedelta(milliseconds=total_ms)
 
 
 async def run_ffmpeg(logger: logging.Logger, args: list):
