@@ -74,15 +74,22 @@ class Recorder:
     async def async_init(self):
         self.logger.info("aiohttp session initialized.")
         self.aio_sess = ClientSession()
-        try:
-            if cfg.TCP:
-                self.logger.info("Connecting to TCP server at %s:%d", self.tcp_host, cfg.TCP_PORT)
-                _, self.writer = await asyncio.open_connection(self.tcp_host, cfg.TCP_PORT)
-            else:
-                self.logger.info(f'Connecting to Unix socket at {cfg.SOCKET_FILE}')
-                _, self.writer = await asyncio.open_unix_connection(cfg.SOCKET_FILE)
-        except Exception as e:
-            self.logger.error("Could not connect to encoder, files will not be processed: %s", str(e))
+        for i in range(3):
+            try:
+                if cfg.TCP:
+                    self.logger.info("Connecting to TCP server at %s:%d", self.tcp_host, cfg.TCP_PORT)
+                    _, self.writer = await asyncio.open_connection(self.tcp_host, cfg.TCP_PORT)
+                else:
+                    self.logger.info(f'Connecting to Unix socket at {cfg.SOCKET_FILE}')
+                    _, self.writer = await asyncio.open_unix_connection(cfg.SOCKET_FILE)
+                self.logger.info("Connected to encoder")
+                break
+            except Exception as e:
+                if i == 2:
+                    self.logger.error("Could not connect to encoder, files will not be processed: %s", str(e))
+                else:
+                    self.logger.error("Could not connect to encoder, retrying: %s", str(e))
+                    await asyncio.sleep(1)
 
     async def close(self):
         await self.aio_sess.close()
@@ -165,7 +172,7 @@ class Recorder:
             win_title = re.sub(r'(\s{2,}|\s+$|[<>:\"/\\|?*\n]+)', '', self.title)
             conv_name = F"{self.start_time_str}_{win_title}"
             # Send job to encoder
-            send_dict = {'src': raw_fp, 'file_name': conv_name, 'user': self.user}
+            send_dict = {'src': raw_fp, 'file_name': conv_name, 'user': self.user, 'raw': True}
             try:
                 await self.send_job(send_dict)
             except Exception as e:
