@@ -3,6 +3,7 @@ import json
 import logging
 import re
 from datetime import timedelta
+from typing import AsyncIterable
 
 try:
     import cv2
@@ -10,13 +11,20 @@ except ImportError:
     print('OpenCV not available')
 
 
+re_watch = {
+    'frame': re.compile(r'frame=(\d+)'),
+    'fps': re.compile(r'fps=(\d+\.\d+)'),
+    'total_size': re.compile(r'total_size=(\d+)'),
+    'out_time': re.compile(r'out_time=(\d{1,2}:\d{2}:\d{2}\.\d+)')
+}
+re_duration = re.compile(r'(?P<h>\d{1,2}):(?P<m>\d{2}):(?P<s>\d{2})\.(?P<ms>\d+)')
+
+
 def parse_duration(time_str: str):
     """Parse HH:MM:SS.MICROSECONDS to timedelta"""
-    m = re.match(r'(?P<h>\d{1,2}):(?P<m>\d{2}):(?P<s>\d{2})\.(?P<ms>\d+)', time_str)
-    if m is None:
-        return
-    td = timedelta(hours=int(m.group('h')), minutes=int(m.group('m')), seconds=int(m.group('s')))
-    return td
+    if m := re_duration.match(time_str):
+        return timedelta(hours=int(m.group('h')), minutes=int(m.group('m')), seconds=int(m.group('s')))
+    return None
 
 
 async def read_video_info(vid_fp: str, logger=None):
@@ -65,43 +73,32 @@ async def run_ffmpeg(logger: logging.Logger, args: list, print_every: int = 30):
     try:
         await asyncio.gather(watch_ffmpeg(logger, p.stdout, print_every), watch_ffmpeg(logger, p.stderr, print_every))
     except Exception as e:
-        logger.critical(f'stdout/err critical failure: {str(e)}')
+        logger.critical('stdout/err critical failure: %s', str(e))
     await p.wait()
     if p.returncode != 0:
-        raise Exception(F"ffmpeg exit code: {p.returncode}")
+        raise Exception(f'ffmpeg exit code: {p.returncode}')
 
 
-async def watch_ffmpeg(logger: logging.Logger, stream: asyncio.StreamReader, print_every: int = 30):
+async def watch_ffmpeg(logger: logging.Logger, stream: AsyncIterable, print_every: int = 30):
     last_time = 0
-    log_dict = {}
+    parsed_dict = {}
     try:
         async for line in stream:
-            tmp = line.decode()
-            # Parse output
-            parsed = {
-                'frame': tmp.split('frame='),
-                'fps': tmp.split('fps='),
-                'size': tmp.split('total_size='),
-                'out_time': tmp.split('out_time=')
-            }
-            # Add found value to log_dict
-            for k, v in parsed.items():
-                if len(v) > 1:
-                    try:
-                        log_dict[k] = float(v[1])
-                    except ValueError:
-                        log_dict[k] = v[1].replace('\n', '')
+            # Add found value to parsed_dict
+            for name, regxp in re_watch.items():
+                if m := regxp.match(line.decode()):
+                    parsed_dict[name] = m.group(1)
                     break
-            if log_dict.keys() == parsed.keys():
+            if len(parsed_dict) == len(re_watch):
                 # Log every print_every seconds
-                curr_time = parse_duration(log_dict['out_time'])
+                curr_time = parse_duration(parsed_dict['out_time'])
                 if curr_time is not None:
                     curr_time = curr_time.total_seconds()
                 if curr_time is None or abs(curr_time - last_time) >= print_every:
                     logger.debug('[ffmpeg] frame %.0f, FPS %.2f, time %s, size %.1fMB',
-                                 log_dict["frame"], log_dict["fps"], str(log_dict["out_time"]),
-                                 log_dict["size"]/1e6)
-                    log_dict.clear()
+                                 int(parsed_dict["frame"]), float(parsed_dict["fps"]), str(parsed_dict["out_time"]),
+                                 int(parsed_dict["total_size"])/1e6)
+                    parsed_dict.clear()
                     last_time = curr_time
     except ValueError as e:
         logger.warning('[ffmpeg] Stream Error: %s', str(e))
