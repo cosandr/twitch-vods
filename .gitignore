@@ -5,5 +5,8 @@ log/
 .idea
 test/frames
 test/log
+test/**/*.mkv
+test/**/*.mp4
+test/**/*.flv
 .vscode/
 .python-version

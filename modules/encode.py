@@ -104,6 +104,15 @@ class Encoder:
                 self.dst_path = env_path
         self.logger.info('Saving encoded files to %s', self.dst_path)
 
+    def mark_job(self, job_num: int):
+        if job_num >= len(self.jobs):
+            raise IndexError("Job number exceeds number of available jobs")
+        j = self.jobs[job_num]
+        j['raw'] = True
+        j['ignore'] = False
+        self._ready.set()
+        self.logger.info('File %s as raw and not ignored', j["file_name"])
+
     #region Job read/write
     def read_jobs(self):
         if not os.path.exists(self.jobs_file):
@@ -175,6 +184,9 @@ class Encoder:
         if not j:
             self._ready.clear()
             return
+        if not os.path.exists(j['src']):
+            self.logger.error('Source file not found: %s', j['src'])
+            return
         keep_raw = False
         # Create folder from username if needed
         out_path = os.path.join(self.dst_path, j['user'])
@@ -229,12 +241,9 @@ class Encoder:
         if not keep_raw and not j.get('failure'):
             try:
                 await self.delete_raw(j['src'], out_fp)
-                j['deleted'] = True
             except Exception as e:
-                j['deleted'] = False
                 j['failure'] = str(e)
-        else:
-            j['deleted'] = False
+        j['deleted'] = not os.path.exists(j['src'])
         self.write_jobs()
 
     async def delete_raw(self, raw_fp: str, proc_fp: str):
