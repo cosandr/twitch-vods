@@ -9,10 +9,13 @@ from skimage.metrics import mean_squared_error, structural_similarity
 
 from modules import Cropper
 
+base_video_path = 'media/twitch/RichardLewisReports/'
 if platform.system() == 'Windows':
-    VIDEO_PATH = "Z:/media/twitch/RichardLewisReports/"
+    VIDEO_PATH = f"Z:/{base_video_path}"
 else:
-    VIDEO_PATH = "/mnt/sshfs/tank/media/twitch/RichardLewisReports/"
+    VIDEO_PATH = f"/tank/{base_video_path}"
+    if platform.node().lower() != 'dresrv':
+        VIDEO_PATH = f"/mnt/sshfs/{VIDEO_PATH}"
 
 FRAME_PATH = './frames'
 

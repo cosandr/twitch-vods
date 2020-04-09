@@ -1,10 +1,13 @@
 import asyncio
 import json
 import logging
+import os
 import re
-from datetime import timedelta
+from datetime import datetime, timedelta
 from logging.handlers import RotatingFileHandler
 from typing import AsyncIterable, Union
+
+import config as cfg
 
 try:
     import cv2
@@ -123,3 +126,20 @@ def setup_logger(logger: logging.Logger, file_name: str):
     fh.setFormatter(log_fmt)
     logger.addHandler(fh)
     logger.addHandler(ch)
+
+
+def get_datetime(name, path='.'):
+    """Returns datetime from file name if possible, otherwise returns last modified time"""
+    if m := re.search(r'\d{6}-\d{4}', name):
+        return datetime.strptime(m.group(), cfg.TIME_FMT)
+    return datetime.fromtimestamp(os.path.getmtime(os.path.join(path, name)))
+
+
+def should_clean(name: str, days: int = 7, path='.'):
+    """Returns True if this file should be deleted"""
+    file_dt = get_datetime(name=name, path=path)
+    file_delta = datetime.now() - file_dt
+    if file_delta > timedelta(days=days):
+        return True
+    return False
+

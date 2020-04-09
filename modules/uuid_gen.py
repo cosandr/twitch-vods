@@ -10,8 +10,7 @@ from typing import Dict
 
 import asyncpg
 
-import config as cfg
-from utils import setup_logger
+from utils import setup_logger, get_datetime
 
 """
 TODO:
@@ -48,6 +47,7 @@ class Generator:
         self.uuid_dict = {}
         # Postgres connection string <user>:<pass>@<host>:<port>/<db>
         self.pg_uri: str = ''
+        # noinspection PyTypeChecker
         self.conn: asyncpg.Connection = None
         self.src_paths: Dict[str, str] = {}
         self.dst_path: str = ''
@@ -61,7 +61,7 @@ class Generator:
         self.loop.run_until_complete(self.async_init())
         self.logger.info("Generator started with PID %d", os.getpid())
 
-    def signal_handler(self, signalnum, frame):
+    def signal_handler(self, signal_num, frame):
         raise KeyboardInterrupt()
 
     def get_env(self):
@@ -130,7 +130,7 @@ class Generator:
                     tmp_uuid = uuid.uuid1()
                     tmp_link = os.path.join(self.dst_path, tmp_uuid.hex)
                     os.symlink(os.path.join(v, file), tmp_link)
-                    created_dt = self.get_datetime(v, file)
+                    created_dt = get_datetime(name=file, path=v)
                     md5 = self.get_md5(os.path.join(v, file))
                     self.uuid_dict[k].append({"filename": file[:-4], "uuid": tmp_uuid, "created": created_dt, "md5": md5})
             self.logger.info("%s links created", k.upper())
@@ -149,7 +149,7 @@ class Generator:
         for k, v in self.src_paths.items():
             for file in os.listdir(v):
                 if file.endswith('.mp4'):
-                    created_dt = self.get_datetime(v, file)
+                    created_dt = get_datetime(name=file, path=v)
                     ten_min_ago = datetime.today() - timedelta(minutes=10)
                     if created_dt > ten_min_ago:
                         tmp_uuid = uuid.uuid1().hex
@@ -180,12 +180,6 @@ class Generator:
                     q = f"DELETE FROM {self.psql_table_name} WHERE uuid=$1"
                     await self.conn.execute(q, tmp)
                     self.logger.info("Old link %s removed from table", tmp)
-
-    def get_datetime(self, path, file):
-        if m := re.search(r'\d{6}-\d{4}', file):
-            return datetime.strptime(m.group(), cfg.TIME_FMT)
-        # self.logger.debug("%s doesn't contain timestamp, fallback to OS modified time.", file)
-        return datetime.fromtimestamp(os.path.getmtime(os.path.join(path, file)))
 
     @staticmethod
     def get_md5(file):
