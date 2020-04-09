@@ -1,6 +1,12 @@
 __pycache__
-config.py
 log/
-transcode.json
+*.json
+*.sock
+.idea
+test/frames
+test/log
+test/**/*.mkv
+test/**/*.mp4
+test/**/*.flv
 .vscode/
 .python-version
