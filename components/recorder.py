@@ -115,8 +115,8 @@ class Recorder:
 
     async def post_record(self, raw_fp: str):
         start_time = self.start_dt.strftime(self.time_fmt)
-        # Title without illegal NTFS characters
-        win_title = re.sub(r'[<>:"\/\\|?*\n]+', '', self.title)
+        # Title without illegal NTFS characters, no extra spaces and no trailing whitespace
+        win_title = re.sub(r'(\s{2,}|\s+$|[<>:\"/\\|?*\n]+)', '', self.title)
         conv_name = F"{start_time}_{win_title}"
         # Send job to transcoder
         send_dict = {'src': raw_fp, 'file_name': conv_name, 'user': self.user}
