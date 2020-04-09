@@ -117,6 +117,7 @@ class Encoder:
         self.dst_path = dst_path
         self.cropper = Cropper()
         self.was_trimmed = False
+        self.convert_non_btn = False
         signal.signal(signal.SIGTERM, self.signal_handler)
 
     def signal_handler(self, signalnum, frame):
@@ -138,9 +139,14 @@ class Encoder:
         if is_btn:
             cmd = self.copy_args.copy()
             out_fp = os.path.join(out_path, j['file_name']+'.mp4')
-        else:
+        elif self.convert_non_btn:
             cmd = self.hevc_args.copy()
             out_fp = os.path.join(out_path, j['file_name']+'.mkv')
+        else:
+            # Don't do anything to non-BTN files
+            self.jobs_done.append({'name': j['file_name'], 'status': 'Ignored'})
+            self.jobs.pop()
+            return
         # Insert input
         cmd.insert(0, '-i')
         cmd.insert(1, j['src'])
