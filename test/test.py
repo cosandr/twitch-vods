@@ -10,7 +10,7 @@ import traceback
 from datetime import datetime, timedelta
 from typing import List
 
-from components import Cropper, Recorder
+from modules import Cropper, Recorder
 from utils import read_video_info_cv2
 
 FFMPEG_COPY = '-i {0} -err_detect ignore_err -f mp4 -c:a aac -c:v copy -y -progress - -nostats -hide_banner {1}'

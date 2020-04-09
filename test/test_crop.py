@@ -7,7 +7,7 @@ import cv2
 import numpy as np
 from skimage.metrics import mean_squared_error, structural_similarity
 
-from components import Cropper
+from modules import Cropper
 
 if platform.system() == 'Windows':
     VIDEO_PATH = "Z:/media/twitch/RichardLewisReports/"

@@ -3,7 +3,8 @@ import json
 import logging
 import re
 from datetime import timedelta
-from typing import AsyncIterable
+from logging.handlers import RotatingFileHandler
+from typing import AsyncIterable, Union
 
 try:
     import cv2
@@ -79,7 +80,7 @@ async def run_ffmpeg(logger: logging.Logger, args: list, print_every: int = 30):
         raise Exception(f'ffmpeg exit code: {p.returncode}')
 
 
-async def watch_ffmpeg(logger: logging.Logger, stream: AsyncIterable, print_every: int = 30):
+async def watch_ffmpeg(logger: logging.Logger, stream: Union[AsyncIterable, asyncio.StreamReader], print_every: int = 30):
     last_time = 0
     parsed_dict = {}
     try:
@@ -103,3 +104,22 @@ async def watch_ffmpeg(logger: logging.Logger, stream: AsyncIterable, print_ever
     except ValueError as e:
         logger.warning('[ffmpeg] Stream Error: %s', str(e))
         pass
+
+
+def setup_logger(logger: logging.Logger, file_name: str):
+    """Adds console handler and rotating file handler at log/<file_name>.log"""
+    log_fmt = logging.Formatter('%(asctime)s:%(levelname)s:%(name)s: %(message)s')
+    # Console Handler
+    ch = logging.StreamHandler()
+    ch.setLevel(logging.INFO)
+    ch.setFormatter(log_fmt)
+    # File Handler
+    fh = RotatingFileHandler(
+        filename=f'log/{file_name}.log',
+        maxBytes=int(1e6), backupCount=3,
+        encoding='utf-8', mode='a'
+    )
+    fh.setLevel(logging.DEBUG)
+    fh.setFormatter(log_fmt)
+    logger.addHandler(fh)
+    logger.addHandler(ch)

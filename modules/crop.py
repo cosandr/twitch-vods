@@ -1,14 +1,13 @@
 import logging
 import os
 import time
-from logging.handlers import RotatingFileHandler
 from typing import List
 
 import cv2
 import numpy as np
 from skimage.metrics import structural_similarity
 
-from utils import run_ffmpeg
+from utils import run_ffmpeg, setup_logger
 
 
 class Cropper:
@@ -33,23 +32,10 @@ class Cropper:
         # Seconds to skip forwards the first time
         self.initial_gap = initial_gap
         # --- Logger ---
-        log_fmt = logging.Formatter('%(asctime)s:%(levelname)s:%(name)s: %(message)s')
-        self.logger = logging.getLogger('cropper')
+        self.logger: logging.Logger = logging.getLogger(self.__class__.__name__)
         self.logger.setLevel(logging.DEBUG)
-        if not os.path.exists('log'):
-            os.mkdir('log')
-        ch = logging.StreamHandler()
-        ch.setLevel(logging.INFO)
-        ch.setFormatter(log_fmt)
-        self.logger.addHandler(ch)
-        fh = RotatingFileHandler(
-            filename=f'log/cropper.log',
-            maxBytes=int(1e6), backupCount=3,
-            encoding='utf-8', mode='a'
-        )
-        fh.setLevel(logging.DEBUG)
-        fh.setFormatter(log_fmt)
-        self.logger.addHandler(fh)
+        setup_logger(self.logger, 'cropper')
+        # --- Logger ---
         self.logger.info("Video cropper started with PID %d", os.getpid())
         # Load reference frame data
         ref_file = 'data/crop-reference.png'

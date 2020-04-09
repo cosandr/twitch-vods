@@ -1,49 +1,95 @@
 #!/usr/bin/python3
 
 import asyncio
+import json
 import logging
 import os
 import pickle
 import re
 import signal
 import sys
-import traceback
 from datetime import datetime
-from logging.handlers import RotatingFileHandler
 
 from aiohttp import ClientSession
 
 import config as cfg
+from utils import setup_logger
 
 
 class Recorder:
-    time_fmt = '%y%m%d-%H%M'
-
-    def __init__(self, loop: asyncio.BaseEventLoop, logger, client_id: str, user: str, timeout: int, raw_path: str):
+    def __init__(self, loop: asyncio.AbstractEventLoop):
         self.loop = loop
-        self.logger = logger
-        self.client_id = client_id
-        self.user = user
-        self.timeout = timeout
-        self.raw_path = raw_path
+        # --- Logger ---
+        self.logger: logging.Logger = logging.getLogger(self.__class__.__name__)
+        self.logger.setLevel(logging.DEBUG)
+        setup_logger(self.logger, 'recorder')
+        # --- Logger ---
+        self.client_id: str = ''
+        self.user: str = ''
+        self.timeout: int = 120
+        self.dst_path: str = '.'
         self.check_en = asyncio.Event()
         self.check_en.set()
-        self.title = ''
-        self.start_time = ''
+        self.title: str = ''
+        self.start_time: datetime = None
+        self.start_time_str: str = ''
+        self.writer: asyncio.StreamWriter = None
+        # IP of encoder when using TCP
+        self.tcp_host: str = '127.0.0.1'
         self.aio_sess = None
         self.ended_ok = False
         signal.signal(signal.SIGTERM, self.signal_handler)
+        self.get_env()
+        self.loop.run_until_complete(self.async_init())
+        self.logger.info("Twitch recorder started with PID %d", os.getpid())
 
     def signal_handler(self, signalnum, frame):
         raise KeyboardInterrupt()
 
-    async def init_sess(self):
+    def get_env(self):
+        """Updates configuration from env variables"""
+        self.user = os.getenv('STREAM_USER')
+        self.client_id = os.getenv('TWITCH_ID')
+        if not self.user:
+            self.logger.critical('A user to check is required')
+            sys.exit(0)
+        if not self.client_id:
+            self.logger.critical('Twitch client ID is required')
+            sys.exit(0)
+        if timeout := os.getenv('CHECK_TIMEOUT'):
+            try:
+                self.timeout = int(timeout)
+            except ValueError:
+                self.logger.error('Invalid timeout %s', timeout)
+        self.logger.info('Checking %s every %d seconds', self.user, self.timeout)
+        if env_path := os.getenv('PATH_RAW'):
+            if not os.path.exists(env_path):
+                self.logger.warning('%s does not exist', env_path)
+            else:
+                self.dst_path = env_path
+        self.logger.info('Saving raw files to %s', self.dst_path)
+        if tcp_host := os.getenv('TCP_HOST'):
+            self.tcp_host = tcp_host
+
+    async def async_init(self):
         self.logger.info("aiohttp session initialized.")
         self.aio_sess = ClientSession()
+        try:
+            if cfg.TCP:
+                self.logger.info("Connecting to TCP server at %s:%d", self.tcp_host, cfg.TCP_PORT)
+                _, self.writer = await asyncio.open_connection(self.tcp_host, cfg.TCP_PORT)
+            else:
+                self.logger.info(f'Connecting to Unix socket at {cfg.SOCKET_FILE}')
+                _, self.writer = await asyncio.open_unix_connection(cfg.SOCKET_FILE)
+        except Exception as e:
+            self.logger.error("Could not connect to encoder, files will not be processed: %s", str(e))
 
-    async def close_sess(self):
+    async def close(self):
         await self.aio_sess.close()
         self.logger.info("aiohttp session closed.")
+        if self.writer:
+            self.writer.close()
+            await self.writer.wait_closed()
 
     async def timer(self, timeout=None):
         if timeout is None:
@@ -89,16 +135,16 @@ class Recorder:
             self.check_en.clear()
             return
         self.title = data['data'][0]['title'].replace("/", "")
-        self.start_dt = datetime.now()
+        self.start_time = datetime.now()
+        self.start_time_str = self.start_time.strftime(cfg.TIME_FMT)
         self.logger.info('%s is live: %s', self.user, self.title)
         await self.record()
 
     async def record(self):
         self.check_en.clear()
         no_space_title = re.sub(r'[^a-zA-Z0-9]+', '_', self.title)
-        start_time_str = self.start_dt.strftime(self.time_fmt)
-        rec_name = F"{start_time_str}_{self.user}_{no_space_title}"
-        raw_fp = os.path.join(self.raw_path, f'{rec_name}.flv')
+        rec_name = F"{self.start_time_str}_{self.user}_{no_space_title}"
+        raw_fp = os.path.join(self.dst_path, f'{rec_name}.flv')
         stream_url = F"twitch.tv/{self.user}"
         self.logger.info('Saving raw stream to %s', raw_fp)
         cmd = F"streamlink {stream_url} --default-stream best -o {raw_fp} -l info"
@@ -114,22 +160,24 @@ class Recorder:
         await self.post_record(raw_fp)
 
     async def post_record(self, raw_fp: str):
-        start_time = self.start_dt.strftime(self.time_fmt)
-        # Title without illegal NTFS characters, no extra spaces and no trailing whitespace
-        win_title = re.sub(r'(\s{2,}|\s+$|[<>:\"/\\|?*\n]+)', '', self.title)
-        conv_name = F"{start_time}_{win_title}"
-        # Send job to transcoder
-        send_dict = {'src': raw_fp, 'file_name': conv_name, 'user': self.user}
-        try:
-            await self.send_job(send_dict)
-        except Exception as e:
-            self.logger.error('%s: src %s, file_name %s, user %s', str(e), *send_dict.values())
+        if self.writer:
+            # Title without illegal NTFS characters, no extra spaces and no trailing whitespace
+            win_title = re.sub(r'(\s{2,}|\s+$|[<>:\"/\\|?*\n]+)', '', self.title)
+            conv_name = F"{self.start_time_str}_{win_title}"
+            # Send job to encoder
+            send_dict = {'src': raw_fp, 'file_name': conv_name, 'user': self.user}
+            try:
+                await self.send_job(send_dict)
+            except Exception as e:
+                self.logger.error('%s: src %s, file_name %s, user %s', str(e), *send_dict.values())
         self.loop.create_task(self.timer())
 
     async def send_job(self, job: dict):
-        _, writer = await asyncio.open_unix_connection(cfg.SOCK, loop=self.loop)
-        writer.write(pickle.dumps(job))
-        await writer.drain()
+        if cfg.JSON_SERIALIZE:
+            self.writer.write(json.dumps(job).encode('utf-8'))
+        else:
+            self.writer.write(pickle.dumps(job))
+        await self.writer.drain()
 
     async def run(self, cmd: str):
         p = await asyncio.create_subprocess_shell(cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
@@ -139,10 +187,10 @@ class Recorder:
             self.logger.critical('stdout/err critical failure: %s', str(e))
         await p.wait()
         if p.returncode != 0 and not self.ended_ok:
-            raise Exception(f"streamlink exit code: {p.returncode}")
+            raise Exception(f"[streamlink] Non-zero exit code {p.returncode}")
         self.ended_ok = False
 
-    async def watch(self, stream, prefix=''):
+    async def watch(self, stream: asyncio.StreamReader, prefix=''):
         try:
             async for line in stream:
                 tmp = line.decode()
@@ -158,56 +206,3 @@ class Recorder:
         except ValueError as e:
             self.logger.warning('[streamlink] STREAM: %s', str(e))
             pass
-
-
-if __name__ == '__main__':
-    # --- Logger ---
-    log_fmt = logging.Formatter('%(asctime)s:%(levelname)s:%(name)s: %(message)s')
-    logger = logging.getLogger('recorder')
-    logger.setLevel(logging.DEBUG)
-    if not os.path.exists('log'):
-        os.mkdir('log')
-    ch = logging.StreamHandler()
-    ch.setLevel(logging.INFO)
-    ch.setFormatter(log_fmt)
-    fh = RotatingFileHandler(
-        filename=f'log/recorder.log',
-        maxBytes=int(1e6), backupCount=3,
-        encoding='utf-8', mode='a'
-    )
-    fh.setLevel(logging.DEBUG)
-    fh.setFormatter(log_fmt)
-    logger.addHandler(fh)
-    logger.addHandler(ch)
-    logger.info("Twitch recorder started with PID %d", os.getpid())
-    user = os.getenv('STREAM_USER')
-    if not user:
-        logger.critical('A user to check is required')
-        sys.exit(0)
-    timeout = os.getenv('CHECK_TIMEOUT', '120')
-    try:
-        timeout = int(timeout)
-    except ValueError:
-        logger.critical('Invalid timeout %s', timeout)
-        sys.exit(0)
-    dst_path = '.'
-    env_path = os.getenv('PATH_RAW')
-    if env_path:
-        if not os.path.exists(env_path):
-            logger.warning('%s does not exist', env_path)
-        else:
-            dst_path = env_path
-    logger.info('Saving raw files to %s', dst_path)
-    loop = asyncio.get_event_loop()
-    rec = Recorder(loop, logger, cfg.TWITCH_ID, user=user, timeout=timeout, raw_path=dst_path)
-    loop.run_until_complete(rec.init_sess())
-    while True:
-        try:
-            loop.run_until_complete(rec.check_if_live())
-        except KeyboardInterrupt:
-            print(F"Keyboard interrupt, exit.")
-            break
-        except Exception as error:
-            traceback.print_exception(type(error), error, error.__traceback__, file=sys.stderr)
-            pass
-    loop.run_until_complete(rec.close_sess())
