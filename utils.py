@@ -59,11 +59,11 @@ def read_video_info_cv2(vid_fp: str):
     # return timedelta(milliseconds=total_ms)
 
 
-async def run_ffmpeg(logger: logging.Logger, args: list):
+async def run_ffmpeg(logger: logging.Logger, args: list, print_every: int = 30):
     logger.debug('CMD: ffmpeg %s', ' '.join(args))
     p = await asyncio.create_subprocess_exec('ffmpeg', *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
     try:
-        await asyncio.gather(watch_ffmpeg(logger, p.stdout), watch_ffmpeg(logger, p.stderr))
+        await asyncio.gather(watch_ffmpeg(logger, p.stdout, print_every), watch_ffmpeg(logger, p.stderr, print_every))
     except Exception as e:
         logger.critical(f'stdout/err critical failure: {str(e)}')
     await p.wait()
@@ -71,8 +71,7 @@ async def run_ffmpeg(logger: logging.Logger, args: list):
         raise Exception(F"ffmpeg exit code: {p.returncode}")
 
 
-async def watch_ffmpeg(logger: logging.Logger, stream: asyncio.StreamReader):
-    print_every = 10
+async def watch_ffmpeg(logger: logging.Logger, stream: asyncio.StreamReader, print_every: int = 30):
     last_time = 0
     log_dict = {}
     try:
@@ -99,7 +98,7 @@ async def watch_ffmpeg(logger: logging.Logger, stream: asyncio.StreamReader):
                 if curr_time is not None:
                     curr_time = curr_time.total_seconds()
                 if curr_time is None or abs(curr_time - last_time) >= print_every:
-                    logger.debug('frame %.0f, FPS %.2f, time %s, size %.1fMB',
+                    logger.debug('[ffmpeg] frame %.0f, FPS %.2f, time %s, size %.1fMB',
                                  log_dict["frame"], log_dict["fps"], str(log_dict["out_time"]),
                                  log_dict["size"]/1e6)
                     log_dict.clear()
