@@ -93,10 +93,11 @@ class Recorder:
 
     async def close(self):
         await self.aio_sess.close()
-        self.logger.info("aiohttp session closed.")
+        self.logger.info("aiohttp session closed")
         if self.writer:
             self.writer.close()
             await self.writer.wait_closed()
+            self.logger.info("Socket connection closed")
 
     async def timer(self, timeout=None):
         if timeout is None:

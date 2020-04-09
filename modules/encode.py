@@ -186,6 +186,8 @@ class Encoder:
             return
         if not os.path.exists(j['src']):
             self.logger.error('Source file not found: %s', j['src'])
+            j['ignore'] = True
+            self.write_jobs()
             return
         keep_raw = False
         # Create folder from username if needed
