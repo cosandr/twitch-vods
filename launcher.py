@@ -8,6 +8,13 @@ from modules import Encoder, Recorder, Generator
 parser = argparse.ArgumentParser(description='Launcher for twitch recorder stuff')
 parser.add_argument('cmd', type=str, nargs=1,
                     help="Command to run", choices=['encoder', 'recorder', 'uuid'])
+parser.add_argument('--convert_non_btn', action='store_true', default=False,
+                    help='Encoder: Encode non-BTN files with HEVC')
+parser.add_argument('--always_copy', action='store_true', default=False,
+                    help='Encoder: Always copy raw files, never encode to HEVC or ignore')
+parser.add_argument('--print_every', type=int, default=60,
+                    help='Encoder: How often to log FFMPEG progress (in seconds)')
+
 
 if __name__ == '__main__':
     loop = asyncio.get_event_loop()
@@ -18,7 +25,8 @@ if __name__ == '__main__':
     cmd = args.cmd[0]
     env = os.environ
     if cmd == 'encoder':
-        encoder = Encoder(loop=loop)
+        encoder = Encoder(loop=loop, convert_non_btn=args.convert_non_btn, always_copy=args.always_copy,
+                          print_every=args.print_every)
         while True:
             try:
                 loop.run_until_complete(encoder.job_wait())

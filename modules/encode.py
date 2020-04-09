@@ -68,8 +68,11 @@ class Encoder:
         '-v', 'warning', '-y', '-progress', '-', '-nostats', '-hide_banner'
     ]
 
-    def __init__(self, loop: asyncio.AbstractEventLoop, convert_non_btn=False):
+    def __init__(self, loop: asyncio.AbstractEventLoop, convert_non_btn=False, always_copy=False, print_every: int = 30):
         self.loop = loop
+        self.convert_non_btn = convert_non_btn
+        self.always_copy = always_copy
+        self.print_every = print_every
         # --- Logger ---
         self.logger: logging.Logger = logging.getLogger(self.__class__.__name__)
         self.logger.setLevel(logging.DEBUG)
@@ -78,12 +81,10 @@ class Encoder:
         self.jobs: List[dict] = []
         self._ready = asyncio.Event()
         self.dst_path = '.'
-        self._was_trimmed = False
         # --- Jobs ---
         self.re_btn = re.compile(r'by\s*the\s*numbers', re.IGNORECASE)
         self.server: asyncio.AbstractServer = None
         self.cropper = Cropper()
-        self.convert_non_btn = convert_non_btn
         signal.signal(signal.SIGTERM, self.signal_handler)
         self.get_env()
         self.loop.run_until_complete(self.async_init())
@@ -110,6 +111,7 @@ class Encoder:
         with open(self.jobs_file, 'r', encoding='utf-8') as fr:
             self.jobs = json.load(fr)
         self.logger.info('Jobs file read')
+        self._ready.set()
 
     def write_jobs(self):
         with open(self.jobs_file, 'w', encoding='utf-8') as fw:
@@ -157,32 +159,30 @@ class Encoder:
         if not os.path.exists(msg['src']):
             self.logger.error('Source file not found: %s', msg['src'])
             return
-        msg['raw'] = True
-        msg['ignore'] = False
         self.jobs.append(msg)
         self.write_jobs()
-        self._ready.set()
+        if not msg.get('ignore'):
+            self._ready.set()
     #endregion
 
     async def job_wait(self):
         await self._ready.wait()
-        # Clear if this is the last job
-        more_jobs = False
-        for j in self.jobs:
-            if j['raw'] and not j.get('ignore'):
-                more_jobs = True
+        j = None
+        for i, job in enumerate(self.jobs):
+            if job['raw'] and not job.get('ignore'):
+                j = self.jobs[i]
                 break
-        if not more_jobs:
+        if not j:
             self._ready.clear()
-        j = self.jobs[-1]
-        self._was_trimmed = False
+            return
+        keep_raw = False
         # Create folder from username if needed
         out_path = os.path.join(self.dst_path, j['user'])
         if not os.path.exists(out_path):
             os.mkdir(out_path)
         # Encode to HEVC if not BTN episode
         is_btn = self.re_btn.search(j['file_name'])
-        if is_btn:
+        if is_btn or self.always_copy:
             cmd = self.copy_args.copy()
             j['enc_file'] = j['file_name'] + '.mp4'
             j['enc_codec'] = 'copy'
@@ -193,6 +193,7 @@ class Encoder:
         else:
             # Don't do anything to non-BTN files
             j['ignore'] = True
+            self.write_jobs()
             return
         out_fp = os.path.join(out_path, j['enc_file'])
         # Insert input
@@ -208,15 +209,15 @@ class Encoder:
                 cmd.insert(0, '-ss')
                 cmd.insert(1, intro_seconds)
                 self.logger.info('Trimming, starting at %d seconds', intro_seconds)
-                self._was_trimmed = True
+                keep_raw = True
                 j['trimmed'] = intro_seconds
             except Exception as e:
                 self.logger.error('Could not find intro seconds: %s', str(e))
         # Try to encode
         try:
-            j['enc_cmd'] = cmd
+            j['enc_cmd'] = ' '.join(cmd)
             j['enc_start'] = datetime.utcnow().isoformat()
-            await run_ffmpeg(logger=self.logger, args=cmd)
+            await run_ffmpeg(logger=self.logger, args=cmd, print_every=self.print_every)
             self.logger.info('Encoded: %s', out_fp)
             j['enc_end'] = datetime.utcnow().isoformat()
             j['raw'] = False
@@ -225,18 +226,18 @@ class Encoder:
             j['failure'] = str(e)
             j['ignore'] = True
         # Try to delete raw
-        if not j.get('failure'):
+        if not keep_raw and not j.get('failure'):
             try:
                 await self.delete_raw(j['src'], out_fp)
                 j['deleted'] = True
             except Exception as e:
                 j['deleted'] = False
                 j['failure'] = str(e)
+        else:
+            j['deleted'] = False
+        self.write_jobs()
 
     async def delete_raw(self, raw_fp: str, proc_fp: str):
-        if self._was_trimmed:
-            self.logger.info('%s was trimmed, will not delete')
-            raise Exception('Video was trimmed')
         if not os.path.exists(proc_fp):
             self.logger.critical('%s -> MISSING %s', raw_fp, proc_fp)
             raise FileNotFoundError(proc_fp)

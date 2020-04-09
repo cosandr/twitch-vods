@@ -184,7 +184,7 @@ class Generator:
     def get_datetime(self, path, file):
         if m := re.search(r'\d{6}-\d{4}', file):
             return datetime.strptime(m.group(), cfg.TIME_FMT)
-        self.logger.debug("%s doesn't contain timestamp, fallback to OS modified time.", file)
+        # self.logger.debug("%s doesn't contain timestamp, fallback to OS modified time.", file)
         return datetime.fromtimestamp(os.path.getmtime(os.path.join(path, file)))
 
     @staticmethod
