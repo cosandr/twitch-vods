@@ -28,10 +28,10 @@ class Notifier:
         self.loop.run_until_complete(self.async_init())
 
     def get_env(self):
-        tcp_host = os.getenv('TCP_HOST')
+        tcp_host = os.getenv('NOTI_HOST')
         if tcp_host:
             self.tcp_host = tcp_host
-        tcp_port = os.getenv('TCP_PORT')
+        tcp_port = os.getenv('NOTI_PORT')
         if tcp_port:
             self.tcp_port = int(tcp_port)
 
