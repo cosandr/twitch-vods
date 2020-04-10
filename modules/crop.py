@@ -25,14 +25,17 @@ class Cropper:
         },
     ]
 
-    def __init__(self, tol: int = 10, initial_gap: int = 300, debug: int = 0):
+    def __init__(self, tol: int = 10, initial_gap: int = 300, debug: int = 0, log_parent=''):
         self.debug = debug
         # Seconds of accuracy to use when searching for intro
         self.tol = tol
         # Seconds to skip forwards the first time
         self.initial_gap = initial_gap
         # --- Logger ---
-        self.logger: logging.Logger = logging.getLogger(self.__class__.__name__)
+        logger_name = self.__class__.__name__
+        if log_parent:
+            logger_name = f'{log_parent}.{logger_name}'
+        self.logger: logging.Logger = logging.getLogger(logger_name)
         self.logger.setLevel(logging.DEBUG)
         setup_logger(self.logger, 'cropper')
         # --- Logger ---

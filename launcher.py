@@ -3,11 +3,11 @@ import asyncio
 import os
 import traceback
 
-from modules import Encoder, Recorder, Generator
+from modules import Encoder, Recorder, Generator, Notifier
 
 parser = argparse.ArgumentParser(description='Launcher for twitch recorder stuff')
 parser.add_argument('cmd', type=str,
-                    help="Command to run", choices=['encoder', 'recorder', 'uuid'])
+                    help="Command to run", choices=['encoder', 'recorder', 'uuid', 'notifier'])
 parser.add_argument('-m', '--manual', action='store_true', default=False,
                     help='Encoder: Run manually, provide src and user')
 parser.add_argument('--job_num', type=int,
@@ -18,6 +18,12 @@ parser.add_argument('--always_copy', action='store_true', default=False,
                     help='Encoder: Always copy raw files, never encode to HEVC or ignore')
 parser.add_argument('--print_every', type=int, default=60,
                     help='Encoder: How often to log FFMPEG progress (in seconds)')
+parser.add_argument('-c', '--content', type=str, nargs='+',
+                    help='Notifier: Send this message')
+parser.add_argument('--tcp_host', type=str,
+                    help='Sets TCP_HOST env variable')
+parser.add_argument('--tcp_port', type=str,
+                    help='Sets TCP_PORT env variable')
 
 
 if __name__ == '__main__':
@@ -68,5 +74,12 @@ if __name__ == '__main__':
         except Exception as error:
             traceback.print_exception(type(error), error, error.__traceback__)
         loop.run_until_complete(gen.close())
+    elif args.cmd == 'notifier':
+        if not args.content:
+            raise Exception('Content is required')
+        content = ' '.join(args.content)
+        notifier = Notifier(loop, tcp_host=args.tcp_host, tcp_port=args.tcp_port)
+        loop.run_until_complete(notifier.send(content=content))
+        loop.run_until_complete(notifier.close())
     else:
         print(f'Unrecognized command {args.cmd}')

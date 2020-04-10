@@ -14,13 +14,15 @@ from aiohttp import ClientSession
 
 import config as cfg
 from utils import setup_logger
+from .notifier import Notifier
 
 
 class Recorder:
     def __init__(self, loop: asyncio.AbstractEventLoop):
         self.loop = loop
         # --- Logger ---
-        self.logger: logging.Logger = logging.getLogger(self.__class__.__name__)
+        logger_name = self.__class__.__name__
+        self.logger: logging.Logger = logging.getLogger(logger_name)
         self.logger.setLevel(logging.DEBUG)
         setup_logger(self.logger, 'recorder')
         # --- Logger ---
@@ -34,6 +36,7 @@ class Recorder:
         self.start_time: datetime = None
         self.start_time_str: str = ''
         self.writer: asyncio.StreamWriter = None
+        self.notifier: Notifier = None
         # IP of encoder when using TCP
         self.tcp_host: str = '127.0.0.1'
         self.aio_sess = None
@@ -41,10 +44,22 @@ class Recorder:
         signal.signal(signal.SIGTERM, self.signal_handler)
         self.get_env()
         self.loop.run_until_complete(self.async_init())
+        try:
+            self.notifier = Notifier(loop=self.loop, log_parent=logger_name)
+        except:
+            self.logger.exception('Notifier not available')
         self.logger.info("Twitch recorder started with PID %d", os.getpid())
 
-    def signal_handler(self, signalnum, frame):
+    def signal_handler(self, signal_num, frame):
         raise KeyboardInterrupt()
+
+    async def send_notification(self, content: str):
+        if not self.notifier:
+            return
+        try:
+            await self.notifier.send(content, name=f'Twitch Recorder for user {self.user}')
+        except:
+            self.logger.exception('Cannot send notification')
 
     def get_env(self):
         """Updates configuration from env variables"""
@@ -92,12 +107,15 @@ class Recorder:
                     await asyncio.sleep(1)
 
     async def close(self):
+        await self.send_notification('Recorder is closing')
         await self.aio_sess.close()
         self.logger.info("aiohttp session closed")
         if self.writer:
             self.writer.close()
             await self.writer.wait_closed()
             self.logger.info("Socket connection closed")
+        if self.notifier:
+            await self.notifier.close()
 
     async def timer(self, timeout=None):
         if timeout is None:
@@ -156,6 +174,7 @@ class Recorder:
         stream_url = F"twitch.tv/{self.user}"
         self.logger.info('Saving raw stream to %s', raw_fp)
         cmd = F"streamlink {stream_url} --default-stream best -o {raw_fp} -l info"
+        await self.send_notification(f'Live stream recording started: {self.title}')
         try:
             await self.run(cmd)
         except Exception as e:
@@ -178,6 +197,7 @@ class Recorder:
                 await self.send_job(send_dict)
             except Exception as e:
                 self.logger.error('%s: src %s, file_name %s, user %s', str(e), *send_dict.values())
+                await self.send_notification(f'No encoder connection: {str(e)}')
         self.loop.create_task(self.timer())
 
     async def send_job(self, job: dict):

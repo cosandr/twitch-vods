@@ -13,6 +13,7 @@ from typing import List
 import config as cfg
 from utils import read_video_info, run_ffmpeg, setup_logger
 from .crop import Cropper
+from .notifier import Notifier
 
 """
 ### Run in shell
@@ -74,7 +75,8 @@ class Encoder:
         self.always_copy = always_copy
         self.print_every = print_every
         # --- Logger ---
-        self.logger: logging.Logger = logging.getLogger(self.__class__.__name__)
+        logger_name = self.__class__.__name__
+        self.logger: logging.Logger = logging.getLogger(logger_name)
         self.logger.setLevel(logging.DEBUG)
         setup_logger(self.logger, 'encoder')
         # --- Jobs ---
@@ -83,15 +85,30 @@ class Encoder:
         self.dst_path = '.'
         # --- Jobs ---
         self.re_btn = re.compile(r'by\s*the\s*numbers', re.IGNORECASE)
+        # noinspection PyTypeChecker
         self.server: asyncio.AbstractServer = None
-        self.cropper = Cropper()
+        self.cropper = Cropper(log_parent=logger_name)
         signal.signal(signal.SIGTERM, self.signal_handler)
         self.get_env()
         self.loop.run_until_complete(self.async_init())
         self.read_jobs()
         self.logger.info("Encoder started with PID %d", os.getpid())
+        # Try to add notifier
+        self.notifier = None
+        try:
+            self.notifier = Notifier(loop=self.loop, log_parent=logger_name)
+        except:
+            self.logger.exception('Notifier not available')
 
-    def signal_handler(self, signalnum, frame):
+    async def send_notification(self, content: str):
+        if not self.notifier:
+            return
+        try:
+            await self.notifier.send(content, name='Twitch Encoder')
+        except:
+            self.logger.exception('Cannot send notification')
+
+    def signal_handler(self, signal_num, frame):
         raise KeyboardInterrupt()
 
     def get_env(self):
@@ -139,6 +156,7 @@ class Encoder:
 
     async def close(self):
         """Close server and remove socket file"""
+        await self.send_notification('Encoder is closing')
         self.write_jobs()
         self.server.close()
         await self.server.wait_closed()
@@ -146,6 +164,8 @@ class Encoder:
         if os.path.exists(cfg.SOCKET_FILE):
             os.unlink(cfg.SOCKET_FILE)
             self.logger.info(f"Socket file removed: {cfg.SOCKET_FILE}")
+        if self.notifier:
+            await self.notifier.close()
 
     async def deserialize(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         """Get and check UNIX socket messages"""
@@ -185,7 +205,9 @@ class Encoder:
             self._ready.clear()
             return
         if not os.path.exists(j['src']):
-            self.logger.error('Source file not found: %s', j['src'])
+            status = f"Source file not found: {j['src']}"
+            await self.send_notification(status)
+            self.logger.error(status)
             j['ignore'] = True
             self.write_jobs()
             return
@@ -206,6 +228,9 @@ class Encoder:
             j['enc_codec'] = 'hevc'
         else:
             # Don't do anything to non-BTN files
+            status = f'Ignoring job for {j["file_name"]}'
+            self.logger.info(status)
+            await self.send_notification(status)
             j['ignore'] = True
             self.write_jobs()
             return
@@ -215,36 +240,49 @@ class Encoder:
         cmd.insert(1, j['src'])
         # Append output file
         cmd.append(out_fp)
-        self.logger.info('Encoding %s -> %s', j['src'], out_fp)
+        status = f"Encoding {j['src']} -> {out_fp}"
+        self.logger.info(status)
+        await self.send_notification(status)
         # Crop if BTN
         if is_btn:
             try:
                 intro_seconds = self.cropper.find_intro(j['src'])
                 cmd.insert(0, '-ss')
                 cmd.insert(1, intro_seconds)
-                self.logger.info('Trimming, starting at %d seconds', intro_seconds)
+                status = f'Trimming, starting at {intro_seconds} seconds'
+                self.logger.info(status)
+                await self.send_notification(status)
                 keep_raw = True
                 j['trimmed'] = intro_seconds
             except Exception as e:
-                self.logger.error('Could not find intro seconds: %s', str(e))
+                self.logger.exception('Could not find intro seconds')
+                await self.send_notification(f'Could not find intro seconds: {str(e)}')
         # Try to encode
         try:
             j['enc_cmd'] = ' '.join(cmd)
             j['enc_start'] = datetime.utcnow().isoformat()
             await run_ffmpeg(logger=self.logger, args=cmd, print_every=self.print_every)
-            self.logger.info('Encoded: %s', out_fp)
             j['enc_end'] = datetime.utcnow().isoformat()
+            status = 'Encoded %s in %s'.format(
+                j['file_name'],
+                str(datetime.fromisoformat(j['enc_end'])-datetime.fromisoformat(j['enc_start']))
+            )
+            self.logger.info(status)
+            await self.send_notification(status)
             j['raw'] = False
         except Exception as e:
-            self.logger.error('Encoding failed: %s', str(e))
+            await self.send_notification(f'Encoding failed: {str(e)}')
+            self.logger.exception('Encoding failed')
             j['failure'] = str(e)
             j['ignore'] = True
         # Try to delete raw
         if not keep_raw and not j.get('failure'):
             try:
                 await self.delete_raw(j['src'], out_fp)
+                await self.send_notification(f'Raw file deleted: {j["src"]}')
             except Exception as e:
                 j['failure'] = str(e)
+                await self.send_notification(f'Delete raw failed: {str(e)}')
         j['deleted'] = not os.path.exists(j['src'])
         self.write_jobs()
 
