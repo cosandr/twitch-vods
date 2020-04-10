@@ -90,19 +90,13 @@ class Encoder:
         self.cropper = Cropper(log_parent=logger_name)
         signal.signal(signal.SIGTERM, self.signal_handler)
         self.get_env()
+        # Try to add notifier
+        self.notifier = Notifier(loop=self.loop, log_parent=logger_name)
         self.loop.run_until_complete(self.async_init())
         self.read_jobs()
         self.logger.info("Encoder started with PID %d", os.getpid())
-        # Try to add notifier
-        self.notifier = None
-        try:
-            self.notifier = Notifier(loop=self.loop, log_parent=logger_name)
-        except:
-            self.logger.exception('Notifier not available')
 
     async def send_notification(self, content: str):
-        if not self.notifier:
-            return
         try:
             await self.notifier.send(content, name='Twitch Encoder')
         except:
@@ -153,6 +147,7 @@ class Encoder:
             self.logger.info(f'Starting UNIX socket on {cfg.SOCKET_FILE}')
             self.server = await asyncio.start_unix_server(self.deserialize, cfg.SOCKET_FILE)
             self.logger.info(F"Socket at {self.server.sockets[0].getsockname()} started")
+        await self.send_notification('Encoder started')
 
     async def close(self):
         """Close server and remove socket file"""
@@ -164,8 +159,6 @@ class Encoder:
         if os.path.exists(cfg.SOCKET_FILE):
             os.unlink(cfg.SOCKET_FILE)
             self.logger.info(f"Socket file removed: {cfg.SOCKET_FILE}")
-        if self.notifier:
-            await self.notifier.close()
 
     async def deserialize(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         """Get and check UNIX socket messages"""
@@ -263,10 +256,8 @@ class Encoder:
             j['enc_start'] = datetime.utcnow().isoformat()
             await run_ffmpeg(logger=self.logger, args=cmd, print_every=self.print_every)
             j['enc_end'] = datetime.utcnow().isoformat()
-            status = 'Encoded %s in %s'.format(
-                j['file_name'],
-                str(datetime.fromisoformat(j['enc_end'])-datetime.fromisoformat(j['enc_start']))
-            )
+            td = datetime.fromisoformat(j['enc_end']) - datetime.fromisoformat(j['enc_start'])
+            status = f"Encoded {j['file_name']} in {str(td)}"
             self.logger.info(status)
             await self.send_notification(status)
             j['raw'] = False

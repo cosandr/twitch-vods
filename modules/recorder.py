@@ -36,26 +36,20 @@ class Recorder:
         self.start_time: datetime = None
         self.start_time_str: str = ''
         self.writer: asyncio.StreamWriter = None
-        self.notifier: Notifier = None
         # IP of encoder when using TCP
         self.tcp_host: str = '127.0.0.1'
         self.aio_sess = None
         self.ended_ok = False
         signal.signal(signal.SIGTERM, self.signal_handler)
         self.get_env()
+        self.notifier = Notifier(loop=self.loop, log_parent=logger_name)
         self.loop.run_until_complete(self.async_init())
-        try:
-            self.notifier = Notifier(loop=self.loop, log_parent=logger_name)
-        except:
-            self.logger.exception('Notifier not available')
         self.logger.info("Twitch recorder started with PID %d", os.getpid())
 
     def signal_handler(self, signal_num, frame):
         raise KeyboardInterrupt()
 
     async def send_notification(self, content: str):
-        if not self.notifier:
-            return
         try:
             await self.notifier.send(content, name=f'Twitch Recorder for user {self.user}')
         except:
@@ -87,6 +81,7 @@ class Recorder:
             self.tcp_host = tcp_host
 
     async def async_init(self):
+        await self.send_notification('Recorder started')
         self.logger.info("aiohttp session initialized.")
         self.aio_sess = ClientSession()
         for i in range(3):
@@ -114,8 +109,6 @@ class Recorder:
             self.writer.close()
             await self.writer.wait_closed()
             self.logger.info("Socket connection closed")
-        if self.notifier:
-            await self.notifier.close()
 
     async def timer(self, timeout=None):
         if timeout is None:
@@ -197,7 +190,9 @@ class Recorder:
                 await self.send_job(send_dict)
             except Exception as e:
                 self.logger.error('%s: src %s, file_name %s, user %s', str(e), *send_dict.values())
-                await self.send_notification(f'No encoder connection: {str(e)}')
+                await self.send_notification(f'Failed to send job to encoder: {str(e)}')
+        else:
+            await self.send_notification('Stream ended, no encoder connection')
         self.loop.create_task(self.timer())
 
     async def send_job(self, job: dict):

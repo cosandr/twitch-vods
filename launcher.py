@@ -80,6 +80,5 @@ if __name__ == '__main__':
         content = ' '.join(args.content)
         notifier = Notifier(loop, tcp_host=args.tcp_host, tcp_port=args.tcp_port)
         loop.run_until_complete(notifier.send(content=content))
-        loop.run_until_complete(notifier.close())
     else:
         print(f'Unrecognized command {args.cmd}')
