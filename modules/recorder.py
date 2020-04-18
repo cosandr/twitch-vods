@@ -14,11 +14,12 @@ from aiohttp import ClientSession
 
 import config as cfg
 from utils import setup_logger
+
 from .notifier import Notifier
 
 
 class Recorder:
-    def __init__(self, loop: asyncio.AbstractEventLoop):
+    def __init__(self, loop: asyncio.AbstractEventLoop, enable_notifications=True):
         self.loop = loop
         # --- Logger ---
         logger_name = self.__class__.__name__
@@ -35,14 +36,16 @@ class Recorder:
         self.title: str = ''
         self.start_time: datetime = None
         self.start_time_str: str = ''
-        self.writer: asyncio.StreamWriter = None
         # IP of encoder when using TCP
         self.tcp_host: str = '127.0.0.1'
         self.aio_sess = None
         self.ended_ok = False
         signal.signal(signal.SIGTERM, self.signal_handler)
         self.get_env()
-        self.notifier = Notifier(loop=self.loop, log_parent=logger_name)
+        if enable_notifications:
+            self.notifier = Notifier(loop=self.loop, log_parent=logger_name)
+        else:
+            self.notifier = None
         self.loop.run_until_complete(self.async_init())
         self.logger.info("Twitch recorder started with PID %d", os.getpid())
 
@@ -50,6 +53,8 @@ class Recorder:
         raise KeyboardInterrupt()
 
     async def send_notification(self, content: str):
+        if not self.notifier:
+            return
         try:
             await self.notifier.send(content, name=f'Twitch Recorder for user {self.user}')
         except:
@@ -80,35 +85,29 @@ class Recorder:
         if tcp_host := os.getenv('TCP_HOST'):
             self.tcp_host = tcp_host
 
+    async def open_conn(self) -> asyncio.StreamWriter:
+        try:
+            if cfg.TCP:
+                self.logger.debug("Connecting to TCP server at %s:%d", self.tcp_host, cfg.TCP_PORT)
+                _, writer = await asyncio.open_connection(self.tcp_host, cfg.TCP_PORT)
+            else:
+                self.logger.debug(f'Connecting to Unix socket at {cfg.SOCKET_FILE}')
+                _, writer = await asyncio.open_unix_connection(cfg.SOCKET_FILE)
+            self.logger.info("Connected to encoder")
+            return writer
+        except Exception as e:
+            self.logger.error("Could not connect to encoder: %s", str(e))
+            raise
+
     async def async_init(self):
         await self.send_notification('Recorder started')
         self.logger.info("aiohttp session initialized.")
         self.aio_sess = ClientSession()
-        for i in range(3):
-            try:
-                if cfg.TCP:
-                    self.logger.info("Connecting to TCP server at %s:%d", self.tcp_host, cfg.TCP_PORT)
-                    _, self.writer = await asyncio.open_connection(self.tcp_host, cfg.TCP_PORT)
-                else:
-                    self.logger.info(f'Connecting to Unix socket at {cfg.SOCKET_FILE}')
-                    _, self.writer = await asyncio.open_unix_connection(cfg.SOCKET_FILE)
-                self.logger.info("Connected to encoder")
-                break
-            except Exception as e:
-                if i == 2:
-                    self.logger.error("Could not connect to encoder, files will not be processed: %s", str(e))
-                else:
-                    self.logger.error("Could not connect to encoder, retrying: %s", str(e))
-                    await asyncio.sleep(1)
 
     async def close(self):
         await self.send_notification('Recorder is closing')
         await self.aio_sess.close()
         self.logger.info("aiohttp session closed")
-        if self.writer:
-            self.writer.close()
-            await self.writer.wait_closed()
-            self.logger.info("Socket connection closed")
 
     async def timer(self, timeout=None):
         if timeout is None:
@@ -180,27 +179,35 @@ class Recorder:
         await self.post_record(raw_fp)
 
     async def post_record(self, raw_fp: str):
-        if self.writer:
-            # Title without illegal NTFS characters, no extra spaces and no trailing whitespace
-            win_title = re.sub(r'(\s{2,}|\s+$|[<>:\"/\\|?*\n]+)', '', self.title)
-            conv_name = F"{self.start_time_str}_{win_title}"
-            # Send job to encoder
-            send_dict = {'src': raw_fp, 'file_name': conv_name, 'user': self.user, 'raw': True}
-            try:
-                await self.send_job(send_dict)
-            except Exception as e:
-                self.logger.error('%s: src %s, file_name %s, user %s', str(e), *send_dict.values())
-                await self.send_notification(f'Failed to send job to encoder: {str(e)}')
-        else:
-            await self.send_notification('Stream ended, no encoder connection')
+        # Title without illegal NTFS characters, no extra spaces and no trailing whitespace
+        win_title = re.sub(r'(\s{2,}|\s+$|[<>:\"/\\|?*\n]+)', '', self.title)
+        conv_name = F"{self.start_time_str}_{win_title}"
+        # Send job to encoder
+        send_dict = {'src': raw_fp, 'file_name': conv_name, 'user': self.user, 'raw': True}
+        try:
+            await self.send_job(send_dict)
+        except Exception as e:
+            self.logger.error('%s: src %s, file_name %s, user %s', str(e), *send_dict.values())
+            await self.send_notification(f'Failed to send job to encoder: {str(e)}')
         self.loop.create_task(self.timer())
 
     async def send_job(self, job: dict):
+        for i in range(3):
+            try:
+                writer = await self.open_conn()
+                break
+            except Exception as e:
+                if i == 2:
+                    raise
+                await asyncio.sleep(1)
         if cfg.JSON_SERIALIZE:
-            self.writer.write(json.dumps(job).encode('utf-8'))
+            writer.write(json.dumps(job).encode('utf-8'))
         else:
-            self.writer.write(pickle.dumps(job))
-        await self.writer.drain()
+            writer.write(pickle.dumps(job))
+        await writer.drain()
+        writer.close()
+        await writer.wait_closed()
+        self.logger.info("Socket connection closed")
 
     async def run(self, cmd: str):
         p = await asyncio.create_subprocess_shell(cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)

@@ -24,6 +24,8 @@ parser.add_argument('--tcp_host', type=str,
                     help='Sets TCP_HOST env variable')
 parser.add_argument('--tcp_port', type=str,
                     help='Sets TCP_PORT env variable')
+parser.add_argument('--no_notifications', action='store_true', default=False,
+                    help='Disable Discord notifications')
 
 
 if __name__ == '__main__':
@@ -34,7 +36,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
     if args.cmd == 'encoder':
         encoder = Encoder(loop=loop, convert_non_btn=args.convert_non_btn, always_copy=args.always_copy,
-                          print_every=args.print_every)
+                          print_every=args.print_every, enable_notifications=not args.no_notifications)
         manual_ran = False
         while True:
             if manual_ran:
@@ -53,7 +55,7 @@ if __name__ == '__main__':
         # Stop server
         loop.run_until_complete(encoder.close())
     elif args.cmd == 'recorder':
-        rec = Recorder(loop)
+        rec = Recorder(loop, enable_notifications=not args.no_notifications)
         while True:
             try:
                 loop.run_until_complete(rec.check_if_live())

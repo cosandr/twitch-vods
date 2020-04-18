@@ -31,11 +31,13 @@ class Notifier:
         if tcp_port:
             self.tcp_port = int(tcp_port)
 
-    async def send(self, content: str, name: str = 'Notifier', time: datetime = datetime.now()):
+    async def send(self, content: str, name: str = 'Notifier', time: datetime = None):
         try:
             _, writer = await self.open_conn()
         except:
             return
+        if time is None:
+            time = datetime.now()
         self.logger.info('Sending message from %s', name)
         msg = {
             'name': name,

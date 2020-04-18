@@ -69,7 +69,8 @@ class Encoder:
         '-v', 'warning', '-y', '-progress', '-', '-nostats', '-hide_banner'
     ]
 
-    def __init__(self, loop: asyncio.AbstractEventLoop, convert_non_btn=False, always_copy=False, print_every: int = 30):
+    def __init__(self, loop: asyncio.AbstractEventLoop, convert_non_btn=False, always_copy=False,
+                 print_every: int = 30, enable_notifications=True):
         self.loop = loop
         self.convert_non_btn = convert_non_btn
         self.always_copy = always_copy
@@ -91,12 +92,17 @@ class Encoder:
         signal.signal(signal.SIGTERM, self.signal_handler)
         self.get_env()
         # Try to add notifier
-        self.notifier = Notifier(loop=self.loop, log_parent=logger_name)
+        if enable_notifications:
+            self.notifier = Notifier(loop=self.loop, log_parent=logger_name)
+        else:
+            self.notifier = None
         self.loop.run_until_complete(self.async_init())
         self.read_jobs()
         self.logger.info("Encoder started with PID %d", os.getpid())
 
     async def send_notification(self, content: str):
+        if not self.notifier:
+            return
         try:
             await self.notifier.send(content, name='Twitch Encoder')
         except:
@@ -241,7 +247,7 @@ class Encoder:
             try:
                 intro_seconds = self.cropper.find_intro(j['src'])
                 cmd.insert(0, '-ss')
-                cmd.insert(1, intro_seconds)
+                cmd.insert(1, str(intro_seconds))
                 status = f'Trimming, starting at {intro_seconds} seconds'
                 self.logger.info(status)
                 await self.send_notification(status)
