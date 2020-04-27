@@ -5,7 +5,7 @@ import os
 import re
 from datetime import datetime, timedelta
 from logging.handlers import RotatingFileHandler
-from typing import AsyncIterable, Union, List, Tuple, Optional
+from typing import AsyncIterable, Union, Optional
 
 import config as cfg
 
@@ -139,32 +139,42 @@ def get_datetime(name, path='.') -> Optional[datetime]:
     return datetime.fromtimestamp(os.path.getmtime(os.path.join(path, name)))
 
 
-def should_clean(name: str, days: int = 7, path='.', ref_dt: datetime = None):
-    """Returns True if this file should be deleted"""
-    file_dt = get_datetime(name=name, path=path)
-    if not ref_dt:
-        ref_dt = datetime.now()
-    file_delta = ref_dt - file_dt
-    if file_delta > timedelta(days=days):
-        return True
-    return False
+def human_timedelta(td: timedelta, max_vals: int = 3) -> str:
+    times = {
+        'year': int(3.154e7),
+        'month': int(2.628e6),
+        'week': 604800,
+        'day': 86400,
+        'hour': 3600,
+        'minute': 60,
+        'second': 1
+    }
+    ret_str = ""
+    seconds = td.total_seconds()
+    if seconds < 1:
+        return "less than one second"
+    tmp = 0
+    for name, val in times.items():
+        if tmp >= max_vals:
+            break
+        unit, rem = divmod(seconds, val)
+        if unit == 0:
+            continue
+        if unit == 1:
+            ret_str += f"{int(unit)} {name}, "
+        else:
+            ret_str += f"{int(unit)} {name}s, "
+        seconds = rem
+        tmp += 1
+    return f"{ret_str[:-2]}"
 
 
-def check_for_deletion(names: List[str], days: int = 7, warn_days: int = 1, **kwargs) -> Tuple[List[str], List[str], List[str]]:
-    """Check whether the input list should be cleaned or not, rest of the args are passed to should_clean
-
-    Returns a tuple with three lists, first is 1-day warning and second is list of deleted files"""
-    del_list: List[str] = []
-    warn_list: List[str] = []
-    failed_list: List[str] = []
-    ref_dt = kwargs.pop('ref_dt', datetime.now())
-    for n in names:
-        try:
-            if should_clean(n, days=days, ref_dt=ref_dt, **kwargs):
-                del_list.append(n)
-            elif should_clean(n, days=days-warn_days, ref_dt=ref_dt, **kwargs):
-                warn_list.append(n)
-        except Exception as e:
-            failed_list.append(f'{n}: {str(e)}')
-
-    return warn_list, del_list, failed_list
+def fmt_plural_str(num: int, what: str = "video") -> str:
+    """Adds s to 'what' if needed
+    (0, 'video') -> 0 videos
+    (1, 'video') -> 1 video
+    (10, 'video') -> 10 videos
+    """
+    if num == 1:
+        return f"{num} {what}"
+    return f"{num} {what}s"

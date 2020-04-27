@@ -1,11 +1,12 @@
-import os
+import asyncio
 import platform
-import random
-import unittest
+import re
 from datetime import datetime, timedelta
 
-import config as cfg
+import pytest_check as check
+
 import utils
+from modules import Cleaner
 
 _base_video_path = 'media/twitch/RichardLewisReports'
 _base_raw_path = 'downloads/twitch'
@@ -20,104 +21,279 @@ VIDEO_PATH = f"{_path_prefix}{_base_video_path}"
 RAW_VIDEO_PATH = f"{_path_prefix}{_base_raw_path}"
 
 
-class TestCrop(unittest.TestCase):
-    @staticmethod
-    def generate_names(num_files=5, ext='flv'):
-        """Generate file names according to format in config"""
-        date = datetime.now()
-        names = []
-        for i in range(num_files):
-            date_str = date.strftime(cfg.TIME_FMT)
-            names.append(f'{date_str}_Test File {i}.{ext}')
-            date = datetime.now() - timedelta(days=random.randint(0, 10), hours=random.randint(0, 10))
-        return names
+class TestCleanup:
+    @classmethod
+    def setup_class(cls):
+        cls.loop = asyncio.get_event_loop()
+        cls.cleaner = Cleaner(loop=cls.loop, check_path=RAW_VIDEO_PATH, enable_notifications=False, dry_run=True)
 
-    def test_cleanup(self):
-        test_dt = datetime(year=2020, month=4, day=9, hour=0, minute=0)
-        # Assumed gap of 7 days
-        expected_def = {
-            '200409-2100_Manual Entry 1.flv': False,
-            '200409-2000_Manual Entry 2.flv': False,
-            '200408-0133_Manual Entry 3.flv': False,
-            '200403-2135_Manual Entry 4.flv': False,
-            '200401-1849_Manual Entry 5.flv': True,
-            '200327-1747_Manual Entry 6.flv': True,
+    def test_show_actual(self):
+        self.cleaner.update()
+        warn_str = self.cleaner.check_for_warnings()
+        del_str = self.cleaner.delete_pending()
+        print(warn_str)
+        print(del_str)
+
+    def test_delete_pending(self):
+        test_dt = datetime(year=2020, month=4, day=1, hour=0, minute=0)
+        input_files = {
+            '200328-0000_DEL.flv',  # Already deleted
+            '200329-1900_DEL.flv',  # Already deleted
+            '200330-2100_DEL.flv',  # Already deleted
+            '200401-0001_SOON.flv',  # 1 min
+            '200401-0100_SOON.flv',  # 1 hour
+            '200401-0600_WARN.flv',  # 6 hours
+            '200401-1600_WARN.flv',  # 16 hours
+            '200403-0000_WARN.flv',  # 2 days
         }
-        for file, expected in expected_def.items():
-            actual = utils.should_clean(file, days=7, ref_dt=test_dt)
-            self.assertEqual(expected, actual, file)
+        self.cleaner.pending.clear()
+        for n in input_files:
+            self.cleaner.pending[n] = utils.get_datetime(n)
+        expected_def = [
+            {
+                "add_hours": 0,  # Reference time 2020-04-01 00:00
+                "pending": [
+                    '200401-0001_SOON.flv',
+                    '200401-0100_SOON.flv',
+                    '200401-0600_WARN.flv',
+                    '200401-1600_WARN.flv',
+                    '200403-0000_WARN.flv',
+                ],
+                "del_str": [
+                    '200328-0000_DEL',
+                    '200329-1900_DEL',
+                    '200330-2100_DEL',
+                ],
+            },
+            {
+                "add_hours": 0,  # Reference time 2020-04-01 00:00
+                "pending": [
+                    '200401-0001_SOON.flv',
+                    '200401-0100_SOON.flv',
+                    '200401-0600_WARN.flv',
+                    '200401-1600_WARN.flv',
+                    '200403-0000_WARN.flv',
+                ],
+                "del_str": [],
+            },
+            {
+                "add_hours": 4,  # Reference time 2020-04-01 04:00
+                "pending": [
+                    '200401-0600_WARN.flv',
+                    '200401-1600_WARN.flv',
+                    '200403-0000_WARN.flv',
+                ],
+                "del_str": [
+                    '200401-0001_SOON',
+                    '200401-0100_SOON',
+                ],
+            },
+            {
+                "add_hours": 24,  # Reference time 2020-04-02 04:00
+                "pending": [
+                    '200403-0000_WARN.flv',
+                ],
+                "del_str": [
+                    '200401-0600_WARN',
+                    '200401-1600_WARN',
+                ],
+            },
+            {
+                "add_hours": 24,  # Reference time 2020-04-03 04:00
+                "pending": [],
+                "del_str": [
+                    '200403-0000_WARN',
+                ],
+            },
+        ]
+        is_in_err = []
+        re_deleted = re.compile(r'-\s\"(.*)\".*')
+        ref_dt = test_dt
+        for expected in expected_def:
+            ref_dt += timedelta(hours=expected['add_hours'])
+            del_str = self.cleaner.delete_pending(ref_dt=ref_dt)
+            print(f"\n--- Current time: {str(ref_dt)} ---\n{del_str}")
+            check.equal(sorted(expected['pending']), sorted(self.cleaner.pending.keys()), str(ref_dt))
 
-    def test_cleanup_random(self):
-        del_str = "Random cleanup to be deleted:\n"
-        nop_str = "Random cleanup no action:\n"
-        for file in self.generate_names(num_files=10):
-            actual = utils.should_clean(file, days=7)
-            if actual:
-                del_str += f"- {file}\n"
-            else:
-                nop_str += f"- {file}\n"
-        print(del_str, nop_str)
+            actual_str = []
+            for m in re_deleted.finditer(del_str):
+                actual_str.append(m.group(1))
+            # Make sure output string contains what it should
+            for name in expected["del_str"]:
+                check.is_in(name, actual_str, f"MISSING {name} - {ref_dt}")
+                if name not in actual_str:
+                    is_in_err.append(f"MISSING {name} - {ref_dt}")
+            # Make sure there are no extras
+            for name in actual_str:
+                check.is_in(name, expected["del_str"], f"EXTRA {name} - {ref_dt}")
+                if name not in expected["del_str"]:
+                    is_in_err.append(f"EXTRA {name} - {ref_dt}")
+        if is_in_err:
+            print(f"\nExpected in del_str but not found:\n" + '\n'.join(is_in_err))
 
-    def test_check_for_deletion(self):
-        test_dt = datetime(year=2020, month=4, day=9, hour=0, minute=0)
-        # Assumed gap of 7 days
-        # None - no action (date 2020-04-04 or higher)
-        # False - warning (date 2020-04-03)
-        # True - deleted (date 2020-04-02 or lower)
-        expected_def = {
-            '200409-2100_Manual Entry NOP.flv': None,
-            '200409-2000_Manual Entry NOP.flv': None,
-            '200408-0133_Manual Entry NOP.flv': None,
-            '200403-0001_Manual Entry WARN.flv': None,
-            '200403-0000_Manual Entry WARN.flv': None,
-            '200402-2359_Manual Entry WARN.flv': False,
-            '200402-0400_Manual Entry WARN.flv': False,
-            '200402-0001_Manual Entry WARN.flv': False,
-            '200402-0000_Manual Entry WARN.flv': False,
-            '200401-2359_Manual Entry DEL.flv': True,
-            '200401-1849_Manual Entry DEL.flv': True,
-            '200327-1747_Manual Entry DEL.flv': True,
+    def test_check_for_warnings(self):
+        test_dt = datetime(year=2020, month=4, day=1, hour=0, minute=0)
+        input_files = {
+            '200330-2100_DEL.flv',  # Already deleted
+            '200401-0001_TOO SOON.flv',  # 1 min
+            '200401-0100_TOO SOON.flv',  # 1 hour
+            '200401-0101_WARN.flv',  # 1 hour, 1 minute
+            '200401-0600_WARN.flv',  # 6 hours
+            '200401-1201_WARN.flv',  # 12 hours, 1 minute
+            '200401-1600_WARN.flv',  # 16 hours
+            '200401-2300_WARN.flv',  # 23 hours
+            '200402-0000_WARN.flv',  # 24 hours
+            '200402-1200_WARN.flv',  # 1 day, 12 hours
+            '200403-0000_WARN.flv',  # 2 days
+            '200403-1200_WARN.flv',  # 2 days, 12 hours
+            '200404-0000_WARN.flv',  # 3 days
+            '200405-0000_WARN.flv',  # 4 days
+            '200406-0000_WARN.flv',  # 5 days
         }
-        warn_list, del_list, _ = utils.check_for_deletion(list(expected_def.keys()), days=7, ref_dt=test_dt)
-        for k, v in expected_def.items():
-            if v is None:
-                self.assertNotIn(k, warn_list)
-                self.assertNotIn(k, del_list)
-            elif v is True:
-                self.assertNotIn(k, warn_list)
-                self.assertIn(k, del_list)
-            elif v is False:
-                self.assertIn(k, warn_list)
-                self.assertNotIn(k, del_list)
+        self.cleaner.pending.clear()
+        for n in input_files:
+            self.cleaner.pending[n] = utils.get_datetime(n)
 
-    def test_check_for_deletion_random(self):
-        names = self.generate_names(num_files=10)
-        warn_list, del_list, _ = utils.check_for_deletion(names, days=7)
-        warn_str = "Random will be deleted tomorrow:\n"
-        del_str = "Random deleted just now:\n"
-        for n in warn_list:
-            warn_str += f"- {n}\n"
-        for n in del_list:
-            del_str += f"- {n}\n"
-        if del_list:
-            print(del_str)
-        if warn_list:
-            print(warn_str)
+        expected_warn = [
+            {
+                "add_hours": 0,
+                "warned": {
+                    '200401-0001_TOO SOON.flv': 12,  # 1 min
+                    '200401-0100_TOO SOON.flv': 12,  # 1 hour
+                    '200401-0101_WARN.flv': 12,  # 1 hour, 1 minute
+                    '200401-0600_WARN.flv': 12,  # 6 hours
+                    '200401-1201_WARN.flv': 24,  # 12 hours, 1 minute
+                    '200401-1600_WARN.flv': 24,  # 16 hours
+                    '200401-2300_WARN.flv': 24,  # 23 hours
+                    '200402-0000_WARN.flv': 24,  # 24 hours
+                    '200402-1200_WARN.flv': 48,  # 1 day, 12 hours
+                    '200403-0000_WARN.flv': 48,  # 2 days
+                },
+                "warn_str": [
+                    '200401-0001_TOO SOON',
+                    '200401-0100_TOO SOON',
+                    '200401-0101_WARN',
+                    '200401-0600_WARN',
+                    '200401-1201_WARN',
+                    '200401-1600_WARN',
+                    '200401-2300_WARN',
+                    '200402-0000_WARN',
+                    '200402-1200_WARN',
+                    '200403-0000_WARN',
+                ],
+            },
+            {
+                "add_hours": 0,
+                "warned": {
+                    '200401-0001_TOO SOON.flv': 12,  # 1 min
+                    '200401-0100_TOO SOON.flv': 12,  # 1 hour
+                    '200401-0101_WARN.flv': 12,  # 1 hour, 1 minute
+                    '200401-0600_WARN.flv': 12,  # 6 hours
+                    '200401-1201_WARN.flv': 24,  # 12 hours, 1 minute
+                    '200401-1600_WARN.flv': 24,  # 16 hours
+                    '200401-2300_WARN.flv': 24,  # 23 hours
+                    '200402-0000_WARN.flv': 24,  # 24 hours
+                    '200402-1200_WARN.flv': 48,  # 1 day, 12 hours
+                    '200403-0000_WARN.flv': 48,  # 2 days
+                },
+                "warn_str": [],
+            },
+            {
+                "add_hours": 3,  # Reference time 2020-04-01 03:00
+                "warned": {
+                    '200401-0600_WARN.flv': 12,  # 3 hours
+                    '200401-1201_WARN.flv': 12,  # 9 hours, 1 minute
+                    '200401-1600_WARN.flv': 24,  # 13 hours
+                    '200401-2300_WARN.flv': 24,  # 20 hours
+                    '200402-0000_WARN.flv': 24,  # 21 hours
+                    '200402-1200_WARN.flv': 48,  # 1 day, 9 hours
+                    '200403-0000_WARN.flv': 48,  # 1 day, 21 hours
+                },
+                "warn_str": [
+                    '200401-1201_WARN',
+                ],
+            },
+            {
+                "add_hours": 6,  # Reference time 2020-04-01 09:00
+                "warned": {
+                    '200401-1201_WARN.flv': 12,  # 3 hours, 1 minute
+                    '200401-1600_WARN.flv': 12,  # 7 hours
+                    '200401-2300_WARN.flv': 24,  # 14 hours
+                    '200402-0000_WARN.flv': 24,  # 15 hours
+                    '200402-1200_WARN.flv': 48,  # 1 day, 3 hours
+                    '200403-0000_WARN.flv': 48,  # 1 day, 15 hours
+                },
+                "warn_str": [
+                    '200401-1600_WARN',
+                ],
+            },
+            {
+                "add_hours": 17,  # Reference time 2020-04-02 02:00
+                "warned": {
+                    '200402-1200_WARN.flv': 12,  # 10 hours
+                    '200403-0000_WARN.flv': 24,  # 22 hours
+                    '200403-1200_WARN.flv': 48,  # 1 day, 10 hours
+                    '200404-0000_WARN.flv': 48,  # 1 day, 22 hours
+                },
+                "warn_str": [
+                    '200402-1200_WARN',
+                    '200403-0000_WARN',
+                    '200403-1200_WARN',
+                    '200404-0000_WARN',
+                ],
+            },
+            {
+                "add_hours": 22,  # Reference time 2020-04-03 00:00
+                "warned": {
+                    '200403-1200_WARN.flv': 12,  # 12 hours
+                    '200404-0000_WARN.flv': 24,  # 1 day
+                    '200405-0000_WARN.flv': 48,  # 2 days
+                },
+                "warn_str": [
+                    '200403-1200_WARN',
+                    '200404-0000_WARN',
+                    '200405-0000_WARN',
+                ],
+            },
+            {
+                "add_hours": 36,  # Reference time 2020-04-04 12:00
+                "warned": {
+                    '200405-0000_WARN.flv': 12,  # 12 hours
+                    '200406-0000_WARN.flv': 48,  # 1 day, 12 hours
+                },
+                "warn_str": [
+                    '200405-0000_WARN',
+                    '200406-0000_WARN',
+                ],
+            },
+            {
+                "add_hours": 48,  # Reference time 2020-04-06 12:00
+                "warned": {},
+                "warn_str": [],
+            },
+        ]
+        is_in_err = []
+        re_deleted = re.compile(r'-\s\"(.*)\".*')
+        ref_dt = test_dt
+        for expected in expected_warn:
+            ref_dt += timedelta(hours=expected['add_hours'])
+            warn_str = self.cleaner.check_for_warnings(ref_dt=ref_dt)
+            print(f"\n--- Current time: {str(ref_dt)} ---\n{warn_str}")
+            for actual_name, actual_th in self.cleaner.warned.items():
+                check.equal(expected['warned'].get(actual_name), actual_th, f"{actual_name} - {ref_dt}")
 
-    def test_check_for_deletion_actual(self):
-        names = sorted(os.listdir(RAW_VIDEO_PATH))
-        warn_list, del_list, _ = utils.check_for_deletion(names, days=4)
-        warn_str = "Actual will be deleted tomorrow:\n"
-        del_str = "Actual deleted just now:\n"
-        for n in warn_list:
-            warn_str += f"- {n}\n"
-        for n in del_list:
-            del_str += f"- {n}\n"
-        if del_list:
-            print(del_str)
-        if warn_list:
-            print(warn_str)
-
-
-if __name__ == '__main__':
-    unittest.main()
+            actual_str = []
+            for m in re_deleted.finditer(warn_str):
+                actual_str.append(m.group(1))
+            # Make sure output string contains what it should
+            for name in expected["warn_str"]:
+                check.is_in(name, actual_str, f"MISSING {name} - {ref_dt}")
+                if name not in actual_str:
+                    is_in_err.append(f"MISSING {name} - {ref_dt}")
+            # Make sure there are no extras
+            for name in actual_str:
+                check.is_in(name, expected["warn_str"], f"EXTRA {name} - {ref_dt}")
+                if name not in expected["warn_str"]:
+                    is_in_err.append(f"EXTRA {name} - {ref_dt}")
+        if is_in_err:
+            print(f"\nExpected in warn_str but not found:\n" + '\n'.join(is_in_err))
