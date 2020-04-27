@@ -14,7 +14,6 @@ from aiohttp import ClientSession
 
 import config as cfg
 from utils import setup_logger
-
 from .notifier import Notifier
 
 
@@ -76,7 +75,7 @@ class Recorder:
             except ValueError:
                 self.logger.error('Invalid timeout %s', timeout)
         self.logger.info('Checking %s every %d seconds', self.user, self.timeout)
-        if env_path := os.getenv('PATH_RAW'):
+        if env_path := os.getenv('PATH_DST'):
             if not os.path.exists(env_path):
                 self.logger.warning('%s does not exist', env_path)
             else:

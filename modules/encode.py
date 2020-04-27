@@ -12,6 +12,7 @@ from typing import List
 
 import config as cfg
 from utils import read_video_info, run_ffmpeg, setup_logger
+from .cleaner import Cleaner
 from .crop import Cropper
 from .notifier import Notifier
 
@@ -70,8 +71,9 @@ class Encoder:
     ]
 
     def __init__(self, loop: asyncio.AbstractEventLoop, convert_non_btn=False, always_copy=False,
-                 print_every: int = 30, enable_notifications=True):
+                 print_every: int = 30, enable_notifications=True, enable_cleaner=True, dry_run=False):
         self.loop = loop
+        self.dry_run = dry_run
         self.convert_non_btn = convert_non_btn
         self.always_copy = always_copy
         self.print_every = print_every
@@ -83,6 +85,7 @@ class Encoder:
         # --- Jobs ---
         self.jobs: List[dict] = []
         self._ready = asyncio.Event()
+        self.src_path = '.'
         self.dst_path = '.'
         # --- Jobs ---
         self.re_btn = re.compile(r'by\s*the\s*numbers', re.IGNORECASE)
@@ -92,10 +95,16 @@ class Encoder:
         signal.signal(signal.SIGTERM, self.signal_handler)
         self.get_env()
         # Try to add notifier
-        if enable_notifications:
+        if enable_notifications and not self.dry_run:
             self.notifier = Notifier(loop=self.loop, log_parent=logger_name)
         else:
             self.notifier = None
+        if enable_cleaner:
+            self.cleaner = Cleaner(loop=self.loop, log_parent=logger_name, check_path=self.src_path,
+                                   notifier=self.notifier, enable_notifications=enable_notifications,
+                                   dry_run=self.dry_run)
+        else:
+            self.cleaner = None
         self.loop.run_until_complete(self.async_init())
         self.read_jobs()
         self.logger.info("Encoder started with PID %d", os.getpid())
@@ -108,18 +117,29 @@ class Encoder:
         except:
             self.logger.exception('Cannot send notification')
 
+    def update_cleaner(self) -> None:
+        """Sets flag for cleaner to update its file list"""
+        if not self.cleaner:
+            return
+        self.cleaner.en_del.set()
+
     def signal_handler(self, signal_num, frame):
         raise KeyboardInterrupt()
 
     def get_env(self):
         """Updates configuration from env variables"""
-        env_path = os.getenv('PATH_PROC')
-        if env_path:
+        if env_path := os.getenv('PATH_DST'):
             if not os.path.exists(env_path):
                 self.logger.warning('%s does not exist', env_path)
             else:
                 self.dst_path = env_path
         self.logger.info('Saving encoded files to %s', self.dst_path)
+        if env_path := os.getenv('PATH_SRC'):
+            if not os.path.exists(env_path):
+                self.logger.warning('%s does not exist', env_path)
+            else:
+                self.src_path = env_path
+        self.logger.info('Source files from %s', self.src_path)
 
     def mark_job(self, job_num: int):
         if job_num >= len(self.jobs):
@@ -140,8 +160,9 @@ class Encoder:
         self._ready.set()
 
     def write_jobs(self):
-        with open(self.jobs_file, 'w', encoding='utf-8') as fw:
-            json.dump(self.jobs, fw, indent=1)
+        if not self.dry_run:
+            with open(self.jobs_file, 'w', encoding='utf-8') as fw:
+                json.dump(self.jobs, fw, indent=1)
         self.logger.info('Jobs file updated')
 
     async def async_init(self):
@@ -165,8 +186,10 @@ class Encoder:
         if os.path.exists(cfg.SOCKET_FILE):
             os.unlink(cfg.SOCKET_FILE)
             self.logger.info(f"Socket file removed: {cfg.SOCKET_FILE}")
+        if self.cleaner:
+            self.cleaner.close()
 
-    async def deserialize(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+    async def deserialize(self, reader: asyncio.StreamReader, _writer: asyncio.StreamWriter):
         """Get and check UNIX socket messages"""
         data = await reader.read(1024)
         if cfg.JSON_SERIALIZE:
@@ -232,6 +255,7 @@ class Encoder:
             await self.send_notification(status)
             j['ignore'] = True
             self.write_jobs()
+            self.update_cleaner()
             return
         out_fp = os.path.join(out_path, j['enc_file'])
         # Insert input
@@ -260,7 +284,8 @@ class Encoder:
         try:
             j['enc_cmd'] = ' '.join(cmd)
             j['enc_start'] = datetime.utcnow().isoformat()
-            await run_ffmpeg(logger=self.logger, args=cmd, print_every=self.print_every)
+            if not self.dry_run:
+                await run_ffmpeg(logger=self.logger, args=cmd, print_every=self.print_every)
             j['enc_end'] = datetime.utcnow().isoformat()
             td = datetime.fromisoformat(j['enc_end']) - datetime.fromisoformat(j['enc_start'])
             status = f"Encoded {j['file_name']} in {str(td)}"
@@ -282,6 +307,7 @@ class Encoder:
                 await self.send_notification(f'Delete raw failed: {str(e)}')
         j['deleted'] = not os.path.exists(j['src'])
         self.write_jobs()
+        self.update_cleaner()
 
     async def delete_raw(self, raw_fp: str, proc_fp: str):
         if not os.path.exists(proc_fp):
@@ -304,7 +330,8 @@ class Encoder:
             self.logger.warning('%s [%s] -> SHORTER %s [%s]', raw_dur, raw_size_str, proc_dur, proc_size_str)
             raise Exception(f'{proc_fp} is too short: {proc_dur}')
         try:
-            os.unlink(raw_fp)
+            if not self.dry_run:
+                os.unlink(raw_fp)
             self.logger.info('Deleted: %s [%s]', raw_fp, raw_size_str)
         except Exception as e:
             self.logger.error('Failed to delete %s [%s]: %s', raw_fp, raw_size_str, str(e))

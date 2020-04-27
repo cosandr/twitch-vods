@@ -67,6 +67,7 @@ class Cleaner:
                     self.logger.exception("Failed to close task")
 
     async def send_notification(self, content: str):
+        self.logger.debug(f"Sending notification\n{content}")
         if not self.notifier:
             return
         try:
@@ -79,9 +80,6 @@ class Cleaner:
         try:
             while True:
                 await self.en_del.wait()
-                self.en_del.clear()
-                # Update pending list
-                self.update()
                 # Try to cancel task if it is already running
                 if self.wait_task:
                     try:
@@ -89,6 +87,9 @@ class Cleaner:
                     except:
                         self.logger.exception("Cannot cancel timer")
                         pass
+                self.en_del.clear()
+                # Update pending list
+                self.update()
                 self.wait_task = await self.wait_next_delete()
         except asyncio.CancelledError:
             self.logger.info("Worker task cancelled")
@@ -133,12 +134,16 @@ class Cleaner:
         del_sec = del_delta.total_seconds()
         if del_sec < 0:
             return
-        self.logger.info(f"Next delete at {del_dt}, sleeping {del_sec:.0f} seconds")
+        if del_sec > 3456000:
+            self.logger.warning(f"Tried to sleep more than 3456000 second limit: {del_sec}")
+            del_sec = 3456000
+        self.logger.info(f"Next delete at {del_dt}, sleeping {del_sec / 3600:.1f} hours")
         try:
             await asyncio.sleep(del_sec)
             self.en_del.set()
         except asyncio.CancelledError:
             self.logger.debug("Timer cancelled")
+            self.wait_task = None
 
     def delete_pending(self, ref_dt=None) -> str:
         """Deletes pending files, returns a status string of deleted items"""
@@ -169,6 +174,8 @@ class Cleaner:
         if del_list:
             ret_str = f"Deleted {fmt_plural_str(len(del_list))}:\n" + "\n".join(del_list)
         if err_list:
+            if ret_str:
+                ret_str += "\n"
             ret_str += f"Could not delete {fmt_plural_str(len(err_list))} videos:\n" + "\n".join(err_list)
         return ret_str
 
