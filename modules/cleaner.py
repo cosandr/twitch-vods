@@ -57,6 +57,7 @@ class Cleaner:
         if not self.dry_run:
             self.worker_task = self.loop.create_task(self.worker())
             self.en_del.set()
+            self.loop.create_task(self.warning_worker())
 
     def close(self):
         for task in (self.wait_task, self.worker_task):
@@ -94,6 +95,15 @@ class Cleaner:
         except asyncio.CancelledError:
             self.logger.info("Worker task cancelled")
 
+    async def warning_worker(self):
+        while True:
+            # Get warning and send notification
+            warn_str = self.check_for_warnings()
+            if warn_str:
+                await self.send_notification(warn_str)
+            # Run again in an hour
+            await asyncio.sleep(3600)
+
     def update(self) -> None:
         """Updates pending"""
         names = self.get_files()
@@ -113,11 +123,7 @@ class Cleaner:
             self.pending[n] = file_dt + timedelta(days=self.clean_days)
 
     async def wait_next_delete(self, ref_dt=None) -> None:
-        """Check for warnings, delete pending and wait for next one"""
-        # Get warning and send notification
-        warn_str = self.check_for_warnings(ref_dt=ref_dt)
-        if warn_str:
-            await self.send_notification(warn_str)
+        """Delete pending and wait for next one"""
         # Delete pending first
         del_str = self.delete_pending(ref_dt=ref_dt)
         if del_str:
