@@ -36,7 +36,8 @@ class Cleaner:
             logger_name = f'{log_parent}.{logger_name}'
         self.logger: logging.Logger = logging.getLogger(logger_name)
         self.logger.setLevel(logging.DEBUG)
-        setup_logger(self.logger, 'cleaner')
+        if not log_parent:
+            setup_logger(self.logger, 'cleaner')
         self.notifier: Notifier = notifier
         if enable_notifications and not self.notifier:
             self.notifier = Notifier(loop=self.loop, log_parent=logger_name)

@@ -19,7 +19,8 @@ class Notifier:
             logger_name = f'{log_parent}.{logger_name}'
         self.logger: logging.Logger = logging.getLogger(logger_name)
         self.logger.setLevel(logging.DEBUG)
-        setup_logger(self.logger, 'notifier')
+        if not log_parent:
+            setup_logger(self.logger, 'notifier')
         # --- Logger ---
         self.get_env()
 

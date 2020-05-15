@@ -51,7 +51,8 @@ class Recorder:
         self.logger.info("Twitch recorder started with PID %d", os.getpid())
 
     def signal_handler(self, signal_num, frame):
-        raise KeyboardInterrupt()
+        self.loop.run_until_complete(self.close())
+        exit(0)
 
     async def send_notification(self, content: str):
         if not self.notifier:
@@ -127,14 +128,16 @@ class Recorder:
         if not data:
             await self.send_notification('User ID API failed')
             self.logger.critical('User ID API failure')
-            raise KeyboardInterrupt
+            await self.close()
+            exit(0)
         for u in data.get('users', []):
-            if u['name'].lower() == self.user_login:
+            if u['name'].lower() == self.user_login.lower():
                 self.user_id = u.get('_id', 0)
         # We didn't find the user ID, likely wrong username given
         if not self.user_id:
-            self.logger.critical('Cannot get user ID, check username')
-            raise KeyboardInterrupt
+            self.logger.critical(f'Cannot get user ID, check username\n{data}')
+            await self.close()
+            exit(0)
         self.logger.debug(f'Got user ID {self.user_id}')
 
     async def get_stream_data(self) -> dict:
@@ -146,7 +149,8 @@ class Recorder:
         if not data:
             await self.send_notification('Streams API failed')
             self.logger.critical('Streams API failure')
-            raise KeyboardInterrupt
+            await self.close()
+            exit(0)
         ret = {}
         if data.get('stream') and data['stream'].get('stream_type') == 'live':
             if time_str := data['stream'].get('created_at'):

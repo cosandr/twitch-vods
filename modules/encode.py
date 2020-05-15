@@ -124,7 +124,8 @@ class Encoder:
         self.cleaner.en_del.set()
 
     def signal_handler(self, signal_num, frame):
-        raise KeyboardInterrupt()
+        self.loop.run_until_complete(self.close())
+        exit(0)
 
     def get_env(self):
         """Updates configuration from env variables"""

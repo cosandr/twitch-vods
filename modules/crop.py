@@ -37,7 +37,8 @@ class Cropper:
             logger_name = f'{log_parent}.{logger_name}'
         self.logger: logging.Logger = logging.getLogger(logger_name)
         self.logger.setLevel(logging.DEBUG)
-        setup_logger(self.logger, 'cropper')
+        if not log_parent:
+            setup_logger(self.logger, 'cropper')
         # --- Logger ---
         self.logger.info("Video cropper started with PID %d", os.getpid())
         # Load reference frame data

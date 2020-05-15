@@ -62,7 +62,8 @@ class Generator:
         self.logger.info("Generator started with PID %d", os.getpid())
 
     def signal_handler(self, signal_num, frame):
-        raise KeyboardInterrupt()
+        self.loop.run_until_complete(self.close())
+        exit(0)
 
     def get_env(self):
         self.pg_uri = os.getenv('PG_URI')
