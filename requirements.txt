@@ -4,3 +4,4 @@ asyncpg
 numpy
 scikit-image
 opencv-python-headless
+python-dateutil
