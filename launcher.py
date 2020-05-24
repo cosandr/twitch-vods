@@ -39,7 +39,7 @@ if __name__ == '__main__':
     if args.cmd == 'encoder':
         encoder = Encoder(loop=loop, convert_non_btn=args.convert_non_btn, always_copy=args.always_copy,
                           print_every=args.print_every, enable_notifications=not args.no_notifications,
-                          dry_run=args.dry_run)
+                          dry_run=args.dry_run, manual_run=args.manual)
         manual_ran = False
         while True:
             if manual_ran:

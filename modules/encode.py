@@ -71,7 +71,8 @@ class Encoder:
     ]
 
     def __init__(self, loop: asyncio.AbstractEventLoop, convert_non_btn=False, always_copy=False,
-                 print_every: int = 30, enable_notifications=True, enable_cleaner=True, dry_run=False):
+                 print_every: int = 30, enable_notifications=True, enable_cleaner=True, dry_run=False,
+                 manual_run=False):
         self.loop = loop
         self.dry_run = dry_run
         self.convert_non_btn = convert_non_btn
@@ -105,7 +106,8 @@ class Encoder:
                                    dry_run=self.dry_run)
         else:
             self.cleaner = None
-        self.loop.run_until_complete(self.async_init())
+        if not manual_run:
+            self.loop.run_until_complete(self.async_init())
         self.read_jobs()
         self.logger.info("Encoder started with PID %d", os.getpid())
 
@@ -181,9 +183,10 @@ class Encoder:
         """Close server and remove socket file"""
         await self.send_notification('Encoder is closing')
         self.write_jobs()
-        self.server.close()
-        await self.server.wait_closed()
-        self.logger.info("Socket closed")
+        if self.server:
+            self.server.close()
+            await self.server.wait_closed()
+            self.logger.info("Socket closed")
         if os.path.exists(cfg.SOCKET_FILE):
             os.unlink(cfg.SOCKET_FILE)
             self.logger.info(f"Socket file removed: {cfg.SOCKET_FILE}")
