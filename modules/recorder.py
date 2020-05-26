@@ -19,6 +19,8 @@ from .notifier import Notifier
 
 
 class Recorder:
+    dumps_path = 'log/dumps'
+
     def __init__(self, loop: asyncio.AbstractEventLoop, enable_notifications=True):
         self.loop = loop
         # --- Logger ---
@@ -35,6 +37,7 @@ class Recorder:
         self.check_en = asyncio.Event()
         self.check_en.set()
         self.title: str = ''
+        self.corrected_title: str = ''
         self.start_time: datetime = None
         self.start_time_str: str = ''
         # IP of encoder when using TCP
@@ -118,6 +121,17 @@ class Recorder:
         await asyncio.sleep(timeout)
         self.check_en.set()
 
+    def dump_response(self, resp: dict, endpoint: str):
+        try:
+            if not os.path.exists(self.dumps_path):
+                os.mkdir(self.dumps_path)
+            file_name = f'{datetime.now().timestamp()}_{self.user_login}_{self.user_id}_{endpoint}.json'
+            with open(os.path.join(self.dumps_path, file_name), 'w', encoding='utf-8') as fw:
+                json.dump(resp, fw)
+            self.logger.debug(f'Dumped response to {file_name}')
+        except:
+            self.logger.exception(f'Cannot dump response: {resp}')
+
     async def get_user_id(self):
         """Sets the user's ID"""
         url = 'https://api.twitch.tv/kraken/users'
@@ -162,11 +176,43 @@ class Recorder:
                     self.logger.warning(f'Cannot parse time string "{time_str}": {e}')
             if 'time' not in ret:
                 ret['time'] = datetime.now()
-            if data.get('channel') and data['channel'].get('status'):
-                ret['title'] = data['channel']['status']
+            if data['stream'].get('channel') and data['stream']['channel'].get('status'):
+                ret['title'] = data['stream']['channel']['status']
             else:
                 ret['title'] = 'UNKNOWN'
+                self.dump_response(data, 'streams')
+                self.loop.create_task(self.try_get_new_name())
         return ret
+
+    async def try_get_new_name(self, timeout=60, retries=3):
+        if self.corrected_title or retries <= 0:
+            return
+        self.logger.debug(f'Could not get stream title, sleeping {timeout}, {retries} tries left')
+        await asyncio.sleep(timeout)
+        await self.get_stream_name()
+        if not self.corrected_title:
+            timeout += 30
+            retries -= 1
+            await self.try_get_new_name(timeout, retries)
+
+    async def get_stream_name(self) -> None:
+        """Returns the stream title"""
+        url = f'https://api.twitch.tv/kraken/streams/{self.user_id}'
+        headers = {'Client-ID': self.client_id, 'Accept': 'application/vnd.twitchtv.v5+json'}
+        data = await self.aio_request(url=url, headers=headers)
+        # API call didn't work
+        if not data:
+            await self.send_notification('Streams API failed')
+            self.logger.error('Streams API failure')
+            return
+        if not data.get('stream'):
+            return
+        if data['stream'].get('channel') and data['stream']['channel'].get('status', ''):
+            self.corrected_title = data['stream']['channel']['status'].replace('/', '')
+            self.logger.debug(f'Got new stream title: {self.corrected_title}')
+            return
+        self.dump_response(data, 'streams')
+        return
 
     async def get_hosting_target(self) -> str:
         """Returns who current is hosting, empty string if nobody"""
@@ -238,6 +284,16 @@ class Recorder:
                 self.loop.create_task(self.timer())
                 return
             self.logger.info("Premature exit but raw file exists.")
+        if self.corrected_title:
+            no_space_title = re.sub(r'[^a-zA-Z0-9]+', '_', self.corrected_title)
+            rec_name = F"{self.start_time_str}_{self.user_login}_{no_space_title}"
+            new_raw_fp = os.path.join(self.dst_path, f'{rec_name}.flv')
+            try:
+                os.rename(raw_fp, new_raw_fp)
+                self.title = self.corrected_title
+                raw_fp = new_raw_fp
+            except:
+                self.logger.exception('Cannot rename file')
         await self.post_record(raw_fp)
 
     async def post_record(self, raw_fp: str):
