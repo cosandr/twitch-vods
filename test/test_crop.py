@@ -17,7 +17,7 @@ else:
     if platform.node().lower() != 'dresrv':
         VIDEO_PATH = f"/mnt/sshfs/{VIDEO_PATH}"
 
-FRAME_PATH = './frames'
+FRAME_PATH = 'test/frames'
 
 """
 Countdown start 12:33 (753)

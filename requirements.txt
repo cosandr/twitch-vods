@@ -5,3 +5,7 @@ numpy
 scikit-image
 opencv-python-headless
 python-dateutil
+pytest
+pytest-check
+pytest-asyncio
+discord.py

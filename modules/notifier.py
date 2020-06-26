@@ -3,16 +3,22 @@ import json
 import logging
 import os
 from datetime import datetime
-from typing import Tuple
+
+from aiohttp import ClientSession
+from discord import Webhook, AsyncWebhookAdapter, Embed
 
 from utils import setup_logger
 
+TIME_FORMAT = '%H:%M:%S'
+EMBED_COLOUR = 0x36393E  # "Transparent" when using dark theme
+USERNAME = 'Twitch'
+
 
 class Notifier:
-    def __init__(self, loop: asyncio.AbstractEventLoop, log_parent='', tcp_host=None, tcp_port=None):
+    def __init__(self, loop: asyncio.AbstractEventLoop, log_parent='', sess=None, mention_id=None, webhook_url=None):
         self.loop = loop
-        self.tcp_host = '127.0.0.1' if not tcp_host else tcp_host
-        self.tcp_port = 6684 if not tcp_port else tcp_port
+        self._created_sess = False
+        self.sess: ClientSession = sess
         # --- Logger ---
         logger_name = self.__class__.__name__
         if log_parent:
@@ -22,47 +28,40 @@ class Notifier:
         if not log_parent:
             setup_logger(self.logger, 'notifier')
         # --- Logger ---
-        self.get_env()
+        if not webhook_url:
+            webhook_url = os.getenv('WEBHOOK_URL')
+            if not webhook_url:
+                self.logger.critical("WEBHOOK_URL is required")
+                raise RuntimeError("webhook_url is required")
+        if not self.sess:
+            self.loop.run_until_complete(self.async_init())
+        self.mention_id = mention_id
+        self.webhook = Webhook.from_url(webhook_url, adapter=AsyncWebhookAdapter(self.sess))
 
-    def get_env(self):
-        tcp_host = os.getenv('NOTI_HOST')
-        if tcp_host:
-            self.tcp_host = tcp_host
-        tcp_port = os.getenv('NOTI_PORT')
-        if tcp_port:
-            self.tcp_port = int(tcp_port)
+    async def async_init(self):
+        self.logger.info("aiohttp session initialized")
+        self.sess = ClientSession()
+        self._created_sess = True
 
-    async def send(self, content: str, name: str = 'Notifier', time: datetime = None):
-        try:
-            _, writer = await self.open_conn()
-        except:
-            return
+    async def close(self):
+        if self._created_sess:
+            await self.sess.close()
+            self.logger.info("aiohttp session closed")
+
+    async def send(self, content: str = '', title: str = '', embed: Embed = None, name: str = 'Notifier', time: datetime = None):
+        if not any((content, title, embed)):
+            raise RuntimeError('Need one of content, title or embed')
+        if self.mention_id:
+            msg_content = f'<@{self.mention_id}>'
+        else:
+            msg_content = ''
+        if embed is None:
+            embed = Embed(title=title, description=content, colour=EMBED_COLOUR)
+            embed.set_author(name=name)
         if time is None:
             time = datetime.now()
-        self.logger.info('Sending message from %s', name)
-        msg = {
-            'name': name,
-            'content': content,
-            'time': time.isoformat(),
-        }
-        writer.write(json.dumps(msg).encode('utf-8'))
-        await writer.drain()
-        writer.close()
-        await writer.wait_closed()
+        embed.set_footer(text=time.strftime(TIME_FORMAT))
+        self.logger.debug(f'Sending message from {name}')
+        await self.webhook.send(content=msg_content, embed=embed, username=USERNAME)
 
-        self.logger.info('Message from %s sent', name)
-
-    async def open_conn(self) -> Tuple[asyncio.StreamReader, asyncio.StreamWriter]:
-        for i in range(3):
-            try:
-                self.logger.info("Connecting to TCP server at %s:%d", self.tcp_host, self.tcp_port)
-                reader, writer = await asyncio.open_connection(self.tcp_host, self.tcp_port)
-                self.logger.info("Connected to notifications server")
-                return reader, writer
-            except Exception as e:
-                if i == 2:
-                    self.logger.critical("Could not connect to notification server: %s", str(e))
-                    raise
-                else:
-                    self.logger.error("Could not connect to notification server, retrying: %s", str(e))
-                    await asyncio.sleep(1)
+        self.logger.debug(f'Sent message from {name}')

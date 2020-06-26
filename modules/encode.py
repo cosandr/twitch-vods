@@ -111,6 +111,33 @@ class Encoder:
         self.read_jobs()
         self.logger.info("Encoder started with PID %d", os.getpid())
 
+    async def async_init(self):
+        if cfg.TCP:
+            self.logger.info("Attempting to listen on 0.0.0.0:%d", cfg.TCP_PORT)
+            self.server = await asyncio.start_server(self.deserialize, '0.0.0.0', cfg.TCP_PORT)
+            self.logger.info(F"Server listening on {self.server.sockets[0].getsockname()}")
+        else:
+            if os.path.exists(cfg.SOCKET_FILE):
+                raise RuntimeError(f'Socket file {cfg.SOCKET_FILE} already exists.')
+            self.logger.info(f'Starting UNIX socket on {cfg.SOCKET_FILE}')
+            self.server = await asyncio.start_unix_server(self.deserialize, cfg.SOCKET_FILE)
+            self.logger.info(F"Socket at {self.server.sockets[0].getsockname()} started")
+        await self.send_notification('Encoder started')
+
+    async def close(self):
+        """Close server and remove socket file"""
+        await self.send_notification('Encoder is closing')
+        self.write_jobs()
+        if self.server:
+            self.server.close()
+            await self.server.wait_closed()
+            self.logger.info("Socket closed")
+        if os.path.exists(cfg.SOCKET_FILE):
+            os.unlink(cfg.SOCKET_FILE)
+            self.logger.info(f"Socket file removed: {cfg.SOCKET_FILE}")
+        if self.cleaner:
+            self.cleaner.close()
+
     async def send_notification(self, content: str):
         if not self.notifier:
             return
@@ -167,31 +194,6 @@ class Encoder:
             with open(self.jobs_file, 'w', encoding='utf-8') as fw:
                 json.dump(self.jobs, fw, indent=1)
         self.logger.info('Jobs file updated')
-
-    async def async_init(self):
-        if cfg.TCP:
-            self.logger.info("Attempting to listen on 0.0.0.0:%d", cfg.TCP_PORT)
-            self.server = await asyncio.start_server(self.deserialize, '0.0.0.0', cfg.TCP_PORT)
-            self.logger.info(F"Server listening on {self.server.sockets[0].getsockname()}")
-        else:
-            self.logger.info(f'Starting UNIX socket on {cfg.SOCKET_FILE}')
-            self.server = await asyncio.start_unix_server(self.deserialize, cfg.SOCKET_FILE)
-            self.logger.info(F"Socket at {self.server.sockets[0].getsockname()} started")
-        await self.send_notification('Encoder started')
-
-    async def close(self):
-        """Close server and remove socket file"""
-        await self.send_notification('Encoder is closing')
-        self.write_jobs()
-        if self.server:
-            self.server.close()
-            await self.server.wait_closed()
-            self.logger.info("Socket closed")
-        if os.path.exists(cfg.SOCKET_FILE):
-            os.unlink(cfg.SOCKET_FILE)
-            self.logger.info(f"Socket file removed: {cfg.SOCKET_FILE}")
-        if self.cleaner:
-            self.cleaner.close()
 
     async def deserialize(self, reader: asyncio.StreamReader, _writer: asyncio.StreamWriter):
         """Get and check UNIX socket messages"""

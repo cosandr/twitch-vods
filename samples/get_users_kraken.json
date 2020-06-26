@@ -1,0 +1,15 @@
+{
+  "_total": 1,
+  "users": [
+    {
+      "display_name": "ESL_CSGO",
+      "_id": "31239503",
+      "name": "esl_csgo",
+      "type": "user",
+      "bio": "Get all your world-class ESL Counter-Strike here!! All premium live content and 24/7 re-runs!!",
+      "created_at": "2012-06-11T13:36:21.618338Z",
+      "updated_at": "2020-06-26T14:49:16.026315Z",
+      "logo": "https://static-cdn.jtvnw.net/jtv_user_pictures/1975b18f-fa7d-443f-b191-fba08f92f3a2-profile_image-300x300.jpeg"
+    }
+  ]
+}

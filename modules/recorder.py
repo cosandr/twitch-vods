@@ -1,6 +1,5 @@
-#!/usr/bin/python3
-
 import asyncio
+import inspect
 import json
 import logging
 import os
@@ -12,10 +11,14 @@ from datetime import datetime, timezone
 
 from aiohttp import ClientSession
 from dateutil.parser import isoparse
+from discord import Embed, Colour
 
 import config as cfg
 from utils import setup_logger
 from .notifier import Notifier
+
+NAME = 'Twitch Recorder'
+ICON_URL = 'https://www.dresrv.com/icons/twitch-recorder.png'
 
 
 class Recorder:
@@ -37,31 +40,65 @@ class Recorder:
         self.check_en = asyncio.Event()
         self.check_en.set()
         self.title: str = ''
-        self.corrected_title: str = ''
         self.start_time: datetime = None
         self.start_time_str: str = ''
         # IP of encoder when using TCP
         self.tcp_host: str = '127.0.0.1'
         self.aio_sess = None
         self.ended_ok = False
+        self.notifier = None
         signal.signal(signal.SIGTERM, self.signal_handler)
         self.get_env()
-        if enable_notifications:
-            self.notifier = Notifier(loop=self.loop, log_parent=logger_name)
-        else:
-            self.notifier = None
         self.loop.run_until_complete(self.async_init())
+        if enable_notifications:
+            try:
+                self.notifier = Notifier(loop=self.loop, log_parent=logger_name, sess=self.aio_sess)
+            except:
+                pass
+        embed = self.make_embed()
+        embed.colour = Colour.light_grey()
+        embed.description = 'Started'
+        self.loop.create_task(self.send_notification(embed=embed))
         self.logger.info("Twitch recorder started with PID %d", os.getpid())
+
+    async def async_init(self):
+        self.logger.info("aiohttp session initialized.")
+        self.aio_sess = ClientSession()
+        await self.get_user_id()
+
+    async def close(self):
+        embed = self.make_embed()
+        embed.colour = Colour.orange()
+        embed.description = 'Closing'
+        await self.send_notification(embed=embed)
+        await self.aio_sess.close()
+        self.logger.info("aiohttp session closed")
 
     def signal_handler(self, signal_num, frame):
         self.loop.run_until_complete(self.close())
         exit(0)
 
-    async def send_notification(self, content: str):
+    def make_embed(self) -> Embed:
+        embed = Embed(title=self.user_login, description=f'Recording {self.title}')
+        embed.set_author(name=NAME, icon_url=ICON_URL)
+        return embed
+
+    def make_embed_error(self, description: str, e: Exception = None) -> Embed:
+        embed = self.make_embed()
+        embed.colour = Colour.red()
+        embed.description = description
+        if e:
+            embed.add_field(name='Error', value=str(e), inline=False)
+        return embed
+
+    async def send_notification(self, content: str = '', embed: Embed = None):
         if not self.notifier:
             return
         try:
-            await self.notifier.send(content, name=f'Twitch Recorder for user {self.user_login}')
+            if not embed and content:
+                embed = self.make_embed()
+                embed.description = content
+            await self.notifier.send(embed=embed)
         except:
             self.logger.exception('Cannot send notification')
 
@@ -104,17 +141,6 @@ class Recorder:
             self.logger.error("Could not connect to encoder: %s", str(e))
             raise
 
-    async def async_init(self):
-        await self.send_notification('Recorder started')
-        self.logger.info("aiohttp session initialized.")
-        self.aio_sess = ClientSession()
-        await self.get_user_id()
-
-    async def close(self):
-        await self.send_notification('Recorder is closing')
-        await self.aio_sess.close()
-        self.logger.info("aiohttp session closed")
-
     async def timer(self, timeout=None):
         if timeout is None:
             timeout = self.timeout
@@ -140,8 +166,6 @@ class Recorder:
         data = await self.aio_request(url=url, headers=headers, params=params)
         # API call didn't work
         if not data:
-            await self.send_notification('User ID API failed')
-            self.logger.critical('User ID API failure')
             await self.close()
             exit(0)
         for u in data.get('users', []):
@@ -161,8 +185,6 @@ class Recorder:
         data = await self.aio_request(url=url, headers=headers)
         # API call didn't work
         if not data:
-            await self.send_notification('Streams API failed')
-            self.logger.critical('Streams API failure')
             await self.close()
             exit(0)
         ret = {}
@@ -174,45 +196,17 @@ class Recorder:
                     ret['time'] = ret['time'].replace(tzinfo=timezone.utc).astimezone(tz=None)
                 except Exception as e:
                     self.logger.warning(f'Cannot parse time string "{time_str}": {e}')
+            ret['preview'] = data['stream']['preview']['medium']
             if 'time' not in ret:
                 ret['time'] = datetime.now()
-            if data['stream'].get('channel') and data['stream']['channel'].get('status'):
-                ret['title'] = data['stream']['channel']['status']
-            else:
+            if data['stream'].get('channel'):
+                ret['user_logo'] = data['stream']['channel']['logo']
+                if data['stream']['channel'].get('status'):
+                    ret['title'] = data['stream']['channel']['status']
+            if 'title' not in ret:
                 ret['title'] = 'UNKNOWN'
                 self.dump_response(data, 'streams')
-                self.loop.create_task(self.try_get_new_name())
         return ret
-
-    async def try_get_new_name(self, timeout=60, retries=3):
-        if self.corrected_title or retries <= 0:
-            return
-        self.logger.debug(f'Could not get stream title, sleeping {timeout}, {retries} tries left')
-        await asyncio.sleep(timeout)
-        await self.get_stream_name()
-        if not self.corrected_title:
-            timeout += 30
-            retries -= 1
-            await self.try_get_new_name(timeout, retries)
-
-    async def get_stream_name(self) -> None:
-        """Returns the stream title"""
-        url = f'https://api.twitch.tv/kraken/streams/{self.user_id}'
-        headers = {'Client-ID': self.client_id, 'Accept': 'application/vnd.twitchtv.v5+json'}
-        data = await self.aio_request(url=url, headers=headers)
-        # API call didn't work
-        if not data:
-            await self.send_notification('Streams API failed')
-            self.logger.error('Streams API failure')
-            return
-        if not data.get('stream'):
-            return
-        if data['stream'].get('channel') and data['stream']['channel'].get('status', ''):
-            self.corrected_title = data['stream']['channel']['status'].replace('/', '')
-            self.logger.debug(f'Got new stream title: {self.corrected_title}')
-            return
-        self.dump_response(data, 'streams')
-        return
 
     async def get_hosting_target(self) -> str:
         """Returns who current is hosting, empty string if nobody"""
@@ -220,8 +214,6 @@ class Recorder:
         params = {'include_logins': 1, 'host': self.user_id}
         data = await self.aio_request(url=url, params=params)
         if not data:
-            await self.send_notification('Hosting API failed')
-            self.logger.error('Hosting API failure')
             return ''
         if not data.get('hosts') or len(data['hosts']) == 0:
             return ''
@@ -229,15 +221,26 @@ class Recorder:
 
     async def aio_request(self, url, headers=None, params=None) -> dict:
         """Run HTTP GET"""
+        caller_name = inspect.stack()[1].function
         data = None
         try:
             async with self.aio_sess.get(url=url, headers=headers, params=params) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                else:
-                    self.logger.error(f'Invalid response {resp.status}\n\t{data}')
+                data = await resp.json()
+                if resp.status != 200:
+                    data_str = json.dumps(data, indent=2)
+                    e = Exception(f'Invalid response {resp.status} {resp.reason}')
+                    embed = self.make_embed_error(f'{caller_name} failed', e=e)
+                    embed.add_field(name='Data', value=f'```json\n{data_str}\n```', inline=False)
+                    await self.send_notification(embed=embed)
+                    self.logger.error(f'{e}\n\t{data_str}')
+                    self.dump_response(data, caller_name)
+                    raise e
         except Exception as e:
-            self.logger.error(f'aiohttp error {e}')
+            if not data:
+                embed = self.make_embed_error(f'{caller_name} failed', e=e)
+                await self.send_notification(embed=embed)
+                self.logger.error(embed.description)
+            data = None
         return data
 
     async def check_if_live(self):
@@ -264,6 +267,15 @@ class Recorder:
         self.start_time = data['time']
         self.start_time_str = self.start_time.strftime(cfg.TIME_FMT)
         self.logger.info('%s is live: %s', self.user_login, self.title)
+        # --- Send notification ---
+        embed = self.make_embed()
+        embed.colour = Colour.green()
+        if 'preview' in data:
+            embed.set_image(url=data['preview'])
+        if 'user_logo' in data:
+            embed.set_thumbnail(url=data['user_logo'])
+        await self.send_notification(embed=embed)
+        # --- Send notification ---
         await self.record()
 
     async def record(self):
@@ -274,7 +286,6 @@ class Recorder:
         stream_url = F"twitch.tv/{self.user_login}"
         self.logger.info('Saving raw stream to %s', raw_fp)
         cmd = F"streamlink {stream_url} --default-stream best -o {raw_fp} -l info"
-        await self.send_notification(f'Live stream recording started: {self.title}')
         try:
             await self.run(cmd)
         except Exception as e:
@@ -284,16 +295,6 @@ class Recorder:
                 self.loop.create_task(self.timer())
                 return
             self.logger.info("Premature exit but raw file exists.")
-        if self.corrected_title:
-            no_space_title = re.sub(r'[^a-zA-Z0-9]+', '_', self.corrected_title)
-            rec_name = F"{self.start_time_str}_{self.user_login}_{no_space_title}"
-            new_raw_fp = os.path.join(self.dst_path, f'{rec_name}.flv')
-            try:
-                os.rename(raw_fp, new_raw_fp)
-                self.title = self.corrected_title
-                raw_fp = new_raw_fp
-            except:
-                self.logger.exception('Cannot rename file')
         await self.post_record(raw_fp)
 
     async def post_record(self, raw_fp: str):
@@ -305,19 +306,16 @@ class Recorder:
         try:
             await self.send_job(send_dict)
         except Exception as e:
-            self.logger.error('%s: src %s, file_name %s, user %s', str(e), *send_dict.values())
-            await self.send_notification(f'Failed to send job to encoder: {str(e)}')
+            self.logger.error(f'{e}: src {raw_fp}, file_name {conv_name}, user {self.user_login}')
+            embed = self.make_embed()
+            embed.colour = Colour.red()
+            embed.description = 'Failed to send job to encoder'
+            embed.add_field(name='Error', value=str(e), inline=False)
+            await self.send_notification(embed=embed)
         self.loop.create_task(self.timer())
 
     async def send_job(self, job: dict):
-        for i in range(3):
-            try:
-                writer = await self.open_conn()
-                break
-            except Exception as e:
-                if i == 2:
-                    raise
-                await asyncio.sleep(1)
+        writer = await self.open_conn()
         if cfg.JSON_SERIALIZE:
             writer.write(json.dumps(job).encode('utf-8'))
         else:

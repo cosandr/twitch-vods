@@ -1,0 +1,47 @@
+{
+  "stream": {
+    "_id": 2047854913,
+    "game": "Counter-Strike: Global Offensive",
+    "broadcast_platform": "live",
+    "community_id": "",
+    "community_ids": [],
+    "viewers": 1173,
+    "video_height": 1080,
+    "average_fps": 60,
+    "delay": 0,
+    "created_at": "2020-06-25T12:04:50Z",
+    "is_playlist": false,
+    "stream_type": "live",
+    "preview": {
+      "small": "https://static-cdn.jtvnw.net/previews-ttv/live_user_esl_csgo-80x45.jpg",
+      "medium": "https://static-cdn.jtvnw.net/previews-ttv/live_user_esl_csgo-320x180.jpg",
+      "large": "https://static-cdn.jtvnw.net/previews-ttv/live_user_esl_csgo-640x360.jpg",
+      "template": "https://static-cdn.jtvnw.net/previews-ttv/live_user_esl_csgo-{width}x{height}.jpg"
+    },
+    "channel": {
+      "mature": false,
+      "status": "RERUN: G2 Esports vs. FaZe Clan [Mirage] Map 1 - ESL One: Road to Rio - Group B - EU",
+      "broadcaster_language": "en",
+      "broadcaster_software": "",
+      "display_name": "ESL_CSGO",
+      "game": "Counter-Strike: Global Offensive",
+      "language": "en",
+      "_id": 31239503,
+      "name": "esl_csgo",
+      "created_at": "2012-06-11T13:36:21.618338Z",
+      "updated_at": "2020-06-26T17:54:59.958664Z",
+      "partner": true,
+      "logo": "https://static-cdn.jtvnw.net/jtv_user_pictures/1975b18f-fa7d-443f-b191-fba08f92f3a2-profile_image-300x300.jpeg",
+      "video_banner": "https://static-cdn.jtvnw.net/jtv_user_pictures/7d7ef6e1-7db0-445c-8e8c-1c963afd4cd6-channel_offline_image-1920x1080.jpeg",
+      "profile_banner": "https://static-cdn.jtvnw.net/jtv_user_pictures/b94955f2-b9f6-4200-8179-3bdf5e032bdf-profile_banner-480.jpeg",
+      "profile_banner_background_color": "#000000",
+      "url": "https://www.twitch.tv/esl_csgo",
+      "views": 489997354,
+      "followers": 3942681,
+      "broadcaster_type": "",
+      "description": "Get all your world-class ESL Counter-Strike here!! All premium live content and 24/7 re-runs!!",
+      "private_video": false,
+      "privacy_options_enabled": false
+    }
+  }
+}
