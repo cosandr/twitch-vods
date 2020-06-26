@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 import asyncio
 import json
 import logging
@@ -9,6 +7,8 @@ import re
 import signal
 from datetime import datetime
 from typing import List
+
+from discord import Embed, Colour
 
 import config as cfg
 from utils import read_video_info, run_ffmpeg, setup_logger
@@ -36,6 +36,9 @@ drop_frames=0
 speed=1.68x
 progress=continue
 """
+
+NAME = 'Twitch Encoder'
+ICON_URL = 'https://www.dresrv.com/icons/twitch-encoder.png'
 
 
 class Encoder:
@@ -88,6 +91,8 @@ class Encoder:
         self._ready = asyncio.Event()
         self.src_path = '.'
         self.dst_path = '.'
+        self.notifier = None
+        self.cleaner = None
         # --- Jobs ---
         self.re_btn = re.compile(r'by\s*the\s*numbers', re.IGNORECASE)
         # noinspection PyTypeChecker
@@ -95,20 +100,26 @@ class Encoder:
         self.cropper = Cropper(log_parent=logger_name)
         signal.signal(signal.SIGTERM, self.signal_handler)
         self.get_env()
-        # Try to add notifier
-        if enable_notifications and not self.dry_run:
-            self.notifier = Notifier(loop=self.loop, log_parent=logger_name)
-        else:
-            self.notifier = None
-        if enable_cleaner:
-            self.cleaner = Cleaner(loop=self.loop, log_parent=logger_name, check_path=self.src_path,
-                                   notifier=self.notifier, enable_notifications=enable_notifications,
-                                   dry_run=self.dry_run)
-        else:
-            self.cleaner = None
         if not manual_run:
             self.loop.run_until_complete(self.async_init())
+        # Try to add notifier
+        if enable_notifications and not self.dry_run:
+            try:
+                self.notifier = Notifier(loop=self.loop, log_parent=logger_name)
+            except:
+                pass
+        if enable_cleaner:
+            try:
+                self.cleaner = Cleaner(loop=self.loop, log_parent=logger_name, check_path=self.src_path,
+                                       notifier=self.notifier, enable_notifications=enable_notifications,
+                                       dry_run=self.dry_run)
+            except:
+                pass
         self.read_jobs()
+        embed = self.make_embed()
+        embed.colour = Colour.light_grey()
+        embed.description = 'Started'
+        self.loop.create_task(self.send_notification(embed=embed))
         self.logger.info("Encoder started with PID %d", os.getpid())
 
     async def async_init(self):
@@ -122,11 +133,13 @@ class Encoder:
             self.logger.info(f'Starting UNIX socket on {cfg.SOCKET_FILE}')
             self.server = await asyncio.start_unix_server(self.deserialize, cfg.SOCKET_FILE)
             self.logger.info(F"Socket at {self.server.sockets[0].getsockname()} started")
-        await self.send_notification('Encoder started')
 
     async def close(self):
         """Close server and remove socket file"""
-        await self.send_notification('Encoder is closing')
+        embed = self.make_embed()
+        embed.colour = Colour.orange()
+        embed.description = 'Closing'
+        await self.send_notification(embed=embed)
         self.write_jobs()
         if self.server:
             self.server.close()
@@ -138,11 +151,26 @@ class Encoder:
         if self.cleaner:
             self.cleaner.close()
 
-    async def send_notification(self, content: str):
+    @staticmethod
+    def make_embed() -> Embed:
+        return Embed().set_author(name=NAME, icon_url=ICON_URL)
+
+    def make_embed_error(self, description: str, e=None) -> Embed:
+        embed = self.make_embed()
+        embed.colour = Colour.red()
+        embed.description = description
+        if e:
+            embed.add_field(name='Error', value=str(e), inline=False)
+        return embed
+
+    async def send_notification(self, content: str = '', embed: Embed = None):
         if not self.notifier:
             return
         try:
-            await self.notifier.send(content, name='Twitch Encoder')
+            if not embed and content:
+                embed = self.make_embed()
+                embed.description = content
+            await self.notifier.send(embed=embed)
         except:
             self.logger.exception('Cannot send notification')
 
@@ -234,7 +262,8 @@ class Encoder:
             return
         if not os.path.exists(j['src']):
             status = f"Source file not found: {j['src']}"
-            await self.send_notification(status)
+            embed = self.make_embed_error('Encode failed', e=status)
+            await self.send_notification(embed=embed)
             self.logger.error(status)
             j['ignore'] = True
             self.write_jobs()
@@ -256,9 +285,11 @@ class Encoder:
             j['enc_codec'] = 'hevc'
         else:
             # Don't do anything to non-BTN files
-            status = f'Ignoring job for {j["file_name"]}'
-            self.logger.info(status)
-            await self.send_notification(status)
+            embed = self.make_embed()
+            embed.title = 'Ignore'
+            embed.description = j["file_name"]
+            await self.send_notification(embed=embed)
+            self.logger.info(f'Ignoring job for {j["file_name"]}')
             j['ignore'] = True
             self.write_jobs()
             self.update_cleaner()
@@ -269,23 +300,25 @@ class Encoder:
         cmd.insert(1, j['src'])
         # Append output file
         cmd.append(out_fp)
-        status = f"Encoding {j['src']} -> {out_fp}"
-        self.logger.info(status)
-        await self.send_notification(status)
+        self.logger.info(f"Encoding {j['src']} -> {out_fp}")
+        embed = self.make_embed()
+        embed.title = 'Encode'
+        embed.add_field(name='Source', value=os.path.basename(j['src']), inline=True)
+        embed.add_field(name='Target', value=j['enc_file'], inline=True)
         # Crop if BTN
         if is_btn:
             try:
                 intro_seconds = self.cropper.find_intro(j['src'])
                 cmd.insert(0, '-ss')
                 cmd.insert(1, str(intro_seconds))
-                status = f'Trimming, starting at {intro_seconds} seconds'
-                self.logger.info(status)
-                await self.send_notification(status)
+                self.logger.info(f'Trimming, starting at {intro_seconds} seconds')
+                embed.add_field(name='Trimmed', value=f'{intro_seconds} seconds', inline=False)
                 keep_raw = True
                 j['trimmed'] = intro_seconds
             except Exception as e:
                 self.logger.exception('Could not find intro seconds')
-                await self.send_notification(f'Could not find intro seconds: {str(e)}')
+                embed.add_field(name='Trim Failed', value=str(e), inline=False)
+        await self.send_notification(embed=embed)
         # Try to encode
         try:
             j['enc_cmd'] = ' '.join(cmd)
@@ -296,10 +329,10 @@ class Encoder:
             td = datetime.fromisoformat(j['enc_end']) - datetime.fromisoformat(j['enc_start'])
             status = f"Encoded {j['file_name']} in {str(td)}"
             self.logger.info(status)
-            await self.send_notification(status)
+            embed.add_field(name='Encode Time', value=str(td), inline=False)
             j['raw'] = False
         except Exception as e:
-            await self.send_notification(f'Encoding failed: {str(e)}')
+            embed.add_field(name='Encode Failed', value=str(e), inline=False)
             self.logger.exception('Encoding failed')
             j['failure'] = str(e)
             j['ignore'] = True
@@ -307,10 +340,11 @@ class Encoder:
         if not keep_raw and not j.get('failure'):
             try:
                 await self.delete_raw(j['src'], out_fp)
-                await self.send_notification(f'Raw file deleted: {j["src"]}')
+                embed.set_field_at(0, name='Source Deleted', value=os.path.basename(j['src']), inline=True)
             except Exception as e:
                 j['failure'] = str(e)
-                await self.send_notification(f'Delete raw failed: {str(e)}')
+                embed.add_field(name='Source Delete Failed', value=str(e), inline=False)
+        await self.send_notification(embed=embed)
         j['deleted'] = not os.path.exists(j['src'])
         self.write_jobs()
         self.update_cleaner()

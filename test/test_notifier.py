@@ -16,8 +16,8 @@ def test_send_embed():
     embed = Embed()
     embed.title = 'RichardLewisReports'
     embed.description = 'Live stream recording started: Return Of By The Numbers #120'
-    embed.set_thumbnail(url='https://static-cdn.jtvnw.net/jtv_user_pictures/richardlewisreports-profile_image-3b5eb60f8f2a79d0-300x300.jpeg')
-    embed.set_image(url='https://static-cdn.jtvnw.net/previews-ttv/live_user_esl_csgo-{width}x{height}.jpg'.format(width=320, height=180))
+    embed.set_thumbnail(url='https://static-cdn.jtvnw.net/jtv_user_pictures/1975b18f-fa7d-443f-b191-fba08f92f3a2-profile_image-300x300.jpeg')
+    embed.set_image(url='https://static-cdn.jtvnw.net/previews-ttv/live_user_esl_csgo-320x180.jpg')
     icon = 'https://www.dresrv.com/icons/twitch-recorder.png'
     embed.set_author(name='Twitch Recorder', icon_url=icon)
     LOOP.run_until_complete(NOTIFIER.send(embed=embed))

@@ -4,8 +4,13 @@ import os
 from datetime import datetime, timedelta
 from typing import List, Tuple, Dict
 
+from discord import Embed
+
 from utils import get_datetime, setup_logger, human_timedelta, fmt_plural_str
 from .notifier import Notifier
+
+NAME = 'Twitch Cleaner'
+ICON_URL = 'https://www.dresrv.com/icons/twitch-cleaner.png'
 
 
 class Cleaner:
@@ -68,12 +73,18 @@ class Cleaner:
                 except:
                     self.logger.exception("Failed to close task")
 
-    async def send_notification(self, content: str):
-        self.logger.debug(f"Sending notification\n{content}")
+    @staticmethod
+    def make_embed() -> Embed:
+        return Embed().set_author(name=NAME, icon_url=ICON_URL)
+
+    async def send_notification(self, content: str = '', embed: Embed = None):
         if not self.notifier:
             return
         try:
-            await self.notifier.send(content, name='Twitch Cleaner')
+            if not embed and content:
+                embed = self.make_embed()
+                embed.description = content
+            await self.notifier.send(embed=embed)
         except:
             self.logger.exception('Cannot send notification')
 

@@ -12,6 +12,7 @@ from utils import setup_logger
 TIME_FORMAT = '%H:%M:%S'
 EMBED_COLOUR = 0x36393E  # "Transparent" when using dark theme
 USERNAME = 'Twitch'
+ICON_URL = 'https://www.dresrv.com/icons/twitch-webhook.png'
 
 
 class Notifier:
@@ -62,6 +63,6 @@ class Notifier:
             time = datetime.now()
         embed.set_footer(text=time.strftime(TIME_FORMAT))
         self.logger.debug(f'Sending message from {name}')
-        await self.webhook.send(content=msg_content, embed=embed, username=USERNAME)
+        await self.webhook.send(content=msg_content, embed=embed, username=USERNAME, avatar_url=ICON_URL)
 
         self.logger.debug(f'Sent message from {name}')

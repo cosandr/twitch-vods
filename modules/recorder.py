@@ -307,10 +307,7 @@ class Recorder:
             await self.send_job(send_dict)
         except Exception as e:
             self.logger.error(f'{e}: src {raw_fp}, file_name {conv_name}, user {self.user_login}')
-            embed = self.make_embed()
-            embed.colour = Colour.red()
-            embed.description = 'Failed to send job to encoder'
-            embed.add_field(name='Error', value=str(e), inline=False)
+            embed = self.make_embed_error('Failed to send job to encoder', e=e)
             await self.send_notification(embed=embed)
         self.loop.create_task(self.timer())
 
