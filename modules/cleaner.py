@@ -2,7 +2,7 @@ import asyncio
 import logging
 import os
 from datetime import datetime, timedelta
-from typing import List, Tuple, Dict
+from typing import List, Tuple, Dict, Optional
 
 from discord import Embed
 
@@ -10,9 +10,10 @@ from utils import get_datetime, setup_logger, human_timedelta, fmt_plural_str
 from .notifier import Notifier
 
 NAME = 'Twitch Cleaner'
-ICON_URL = 'https://www.dresrv.com/icons/twitch-cleaner.png'
+ICON_URL = 'https://raw.githubusercontent.com/cosandr/twitch-vods/master/icons/cleaner.png'
 
 
+# noinspection PyBroadException
 class Cleaner:
     """
     pending = {
@@ -23,13 +24,15 @@ class Cleaner:
         <file_path>: <int, hours warning>
     }
     """
-    def __init__(self, loop: asyncio.AbstractEventLoop, check_path: str, log_parent='', clean_days=7,
-                 warn_at: List[int] = None, notifier: Notifier = None, enable_notifications=True,
-                 dry_run=False):
+    def __init__(self, loop: asyncio.AbstractEventLoop, check_path: str, **kwargs):
         self.loop = loop
-        self.dry_run = dry_run
         self.check_path: str = check_path
-        self.clean_days: int = clean_days
+        self.dry_run: bool = kwargs.get('dry_run', False)
+        enable_notifications: bool = not kwargs.get('no_notifications', False)
+        log_parent: str = kwargs.get('log_parent', '')
+        self.clean_days: int = kwargs.pop('clean_days', 7)
+        self.notifier: Optional[Notifier] = kwargs.pop('notifier', None)
+        warn_at: Optional[List[int]] = kwargs.pop('warn_at', None)
         if warn_at:
             self.warn_at: List[int] = sorted(warn_at, reverse=True)
         else:
@@ -41,11 +44,20 @@ class Cleaner:
             logger_name = f'{log_parent}.{logger_name}'
         self.logger: logging.Logger = logging.getLogger(logger_name)
         self.logger.setLevel(logging.DEBUG)
+        kwargs['log_parent'] = logger_name
         if not log_parent:
             setup_logger(self.logger, 'cleaner')
-        self.notifier: Notifier = notifier
-        if enable_notifications and not self.notifier:
-            self.notifier = Notifier(loop=self.loop, log_parent=logger_name)
+
+        if enable_notifications:
+            if not self.notifier:
+                try:
+                    self.notifier = Notifier(loop=self.loop, **kwargs)
+                except Exception:
+                    self.logger.exception('Cannot initialize Notifier')
+            else:
+                self.notifier = None
+                self.logger.info('No notifications')
+
         self.pending: Dict[str, datetime] = {}
         # Track for which files we sent warnings for and when
         self.warned: Dict[str, int] = {}
@@ -54,12 +66,10 @@ class Cleaner:
         self.update()
         # Event for running task again
         self.en_del = asyncio.Event()
-        # noinspection PyTypeChecker
         # Task for wait task
-        self.wait_task: asyncio.Task = None
-        # noinspection PyTypeChecker
+        self.wait_task: Optional[asyncio.Task] = None
         # Task for worker
-        self.worker_task: asyncio.Task = None
+        self.worker_task: Optional[asyncio.Task] = None
         if not self.dry_run:
             self.worker_task = self.loop.create_task(self.worker())
             self.en_del.set()
@@ -70,7 +80,7 @@ class Cleaner:
             if task:
                 try:
                     task.cancel()
-                except:
+                except Exception:
                     self.logger.exception("Failed to close task")
 
     @staticmethod
@@ -85,7 +95,7 @@ class Cleaner:
                 embed = self.make_embed()
                 embed.description = content
             await self.notifier.send(embed=embed)
-        except:
+        except Exception:
             self.logger.exception('Cannot send notification')
 
     async def worker(self):
@@ -97,7 +107,7 @@ class Cleaner:
                 if self.wait_task:
                     try:
                         self.wait_task.cancel()
-                    except:
+                    except Exception:
                         self.logger.exception("Cannot cancel timer")
                         pass
                 self.en_del.clear()
@@ -128,7 +138,7 @@ class Cleaner:
                 if not isinstance(file_dt, datetime):
                     raise ValueError(f"Expected datetime, got {type(file_dt)}: {file_dt}")
                 self.logger.info(f"{n} will be deleted at {file_dt}")
-            except:
+            except Exception:
                 self.blacklist.append(n)
                 self.logger.exception(f"Cannot determine datetime for {n}")
                 continue

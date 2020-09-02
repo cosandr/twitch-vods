@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import os
 from datetime import datetime
 
 from aiohttp import ClientSession
@@ -11,14 +10,16 @@ from utils import setup_logger
 TIME_FORMAT = '%H:%M:%S'
 EMBED_COLOUR = 0x36393E  # "Transparent" when using dark theme
 USERNAME = 'Twitch'
-ICON_URL = 'https://www.dresrv.com/icons/twitch-webhook.png'
+ICON_URL = 'https://raw.githubusercontent.com/cosandr/twitch-vods/master/icons/webhook.png'
 
 
 class Notifier:
-    def __init__(self, loop: asyncio.AbstractEventLoop, log_parent='', sess=None, mention_id=None, webhook_url=None):
+    def __init__(self, loop: asyncio.AbstractEventLoop, webhook_url: str, **kwargs):
         self.loop = loop
+        self.sess: ClientSession = kwargs.get('sess', None)
+        log_parent: str = kwargs.get('log_parent', '')
+        self.mention_id: str = kwargs.pop('mention_id', '')
         self._created_sess = False
-        self.sess: ClientSession = sess
         # --- Logger ---
         logger_name = self.__class__.__name__
         if log_parent:
@@ -28,14 +29,8 @@ class Notifier:
         if not log_parent:
             setup_logger(self.logger, 'notifier')
         # --- Logger ---
-        if not webhook_url:
-            webhook_url = os.getenv('WEBHOOK_URL')
-            if not webhook_url:
-                self.logger.critical("WEBHOOK_URL is required")
-                raise RuntimeError("webhook_url is required")
         if not self.sess:
             self.loop.run_until_complete(self.async_init())
-        self.mention_id = mention_id
         self.webhook = Webhook.from_url(webhook_url, adapter=AsyncWebhookAdapter(self.sess))
 
     async def async_init(self):

@@ -1,5 +1,4 @@
 import asyncio
-import os
 import pytest
 from modules import Recorder
 
@@ -10,7 +9,7 @@ class TestTwitchAPI:
     @classmethod
     def setup_class(cls):
         cls.loop = asyncio.get_event_loop()
-        cls.rec = Recorder(cls.loop, enable_notifications=False)
+        cls.rec = Recorder(cls.loop, no_notifications=True)
 
     @classmethod
     def teardown_class(cls):
@@ -18,5 +17,6 @@ class TestTwitchAPI:
 
     @pytest.mark.asyncio
     async def test_get_user_id(self):
-        await self.rec.get_user_id()
+        actual = await self.rec.get_user_id("esl_csgo")
+        assert actual.id == ESL_CSGO_ID
 

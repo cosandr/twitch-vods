@@ -5,7 +5,7 @@ from utils import setup_logger
 _logger_name = 'Recorder'
 LOGGER = logging.getLogger(_logger_name)
 LOGGER.setLevel(logging.DEBUG)
-setup_logger(LOGGER, _logger_name)
+setup_logger(LOGGER, _logger_name.lower())
 
 
 class InvalidResponseError(Exception):

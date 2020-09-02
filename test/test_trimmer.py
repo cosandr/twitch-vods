@@ -7,17 +7,34 @@ import cv2
 import numpy as np
 from skimage.metrics import mean_squared_error, structural_similarity
 
-from modules import Cropper
+from modules import IntroTrimmer
+from modules.intro_trimmer.config import Config
+from modules.intro_trimmer.utils import crop_to_regions
 
 base_video_path = 'media/twitch/RichardLewisReports/'
 if platform.system() == 'Windows':
-    VIDEO_PATH = f"Z:/{base_video_path}"
+    VIDEO_PATH = f"T:/{base_video_path}"
 else:
     VIDEO_PATH = f"/tank/{base_video_path}"
     if platform.node().lower() != 'dresrv':
-        VIDEO_PATH = f"/mnt/sshfs/{VIDEO_PATH}"
+        VIDEO_PATH = f"/dresrv/{VIDEO_PATH}"
 
 FRAME_PATH = 'test/frames'
+CONFIG = Config(
+    pattern=r'by\s*the\s*numbers',
+    pattern_opt='IGNORECASE',
+    image='data/trimmer/btn.png',
+    check_areas=[
+        {
+            "start": [0, 298],
+            "size": [640, 52],
+        },
+        {
+            "start": [499, 248],
+            "size": [137, 40],
+        },
+    ],
+)
 
 """
 Countdown start 12:33 (753)
@@ -32,7 +49,7 @@ ffmpeg -i "$IN" -ss 30 -s 640x360 -qscale:v 10 -frames:v 1 -c:v png -f image2pip
 class TestCrop(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.cropper = Cropper(tol=5, initial_gap=300, debug=0)
+        cls.cropper = IntroTrimmer(tol=5, initial_gap=300, debug=0, cfg_path='data/trimmer/config.json')
 
     def test_is_start_wait(self):
         expected_def = {
@@ -46,7 +63,7 @@ class TestCrop(unittest.TestCase):
         for file, dct in expected_def.items():
             for expected, values in dct.items():
                 for val in values:
-                    actual = self.cropper.is_start_wait(VIDEO_PATH + file, val)
+                    actual = self.cropper.is_start_wait(VIDEO_PATH + file, val, CONFIG)
                     self.assertEqual(expected, actual, f'{file} [{val}]')
 
     def test_compare(self):
@@ -56,10 +73,10 @@ class TestCrop(unittest.TestCase):
             fp = os.path.join(FRAME_PATH, f)
             img = cv2.imread(fp, cv2.IMREAD_GRAYSCALE)
             start = time.perf_counter()
-            mse_err = mean_squared_error(self.cropper.ref, img)
+            mse_err = mean_squared_error(CONFIG.image, img)
             mse_time = (time.perf_counter() - start)*1000
             start = time.perf_counter()
-            ssim_err = structural_similarity(self.cropper.ref, img)
+            ssim_err = structural_similarity(CONFIG.image, img)
             ssim_time = (time.perf_counter() - start)*1000
             print('%s: MSE [%.2fms] %.2f, SSIM [%.2fms] %.2f' % (fp, mse_time, mse_err, ssim_time, ssim_err))
 
@@ -69,13 +86,13 @@ class TestCrop(unittest.TestCase):
                 continue
             fp = os.path.join(FRAME_PATH, f)
             img = cv2.imread(fp, cv2.IMREAD_GRAYSCALE)
-            r_img = self.cropper._crop_to_regions(img)
-            for i in range(len(self.cropper.ref_regions)):
+            r_img = crop_to_regions(img, CONFIG.check_areas)
+            for i in range(len(CONFIG.regions)):
                 start = time.perf_counter()
-                mse_err = mean_squared_error(self.cropper.ref_regions[i], r_img[i])
+                mse_err = mean_squared_error(CONFIG.regions[i], r_img[i])
                 mse_time = (time.perf_counter() - start)*1000
                 start = time.perf_counter()
-                ssim_err = structural_similarity(self.cropper.ref_regions[i], r_img[i])
+                ssim_err = structural_similarity(CONFIG.regions[i], r_img[i])
                 ssim_time = (time.perf_counter() - start)*1000
                 print('%s region %d: MSE [%.2fms] %.2f, SSIM [%.2fms] %.2f' % (fp, i, mse_time, mse_err, ssim_time, ssim_err))
                 i += 1

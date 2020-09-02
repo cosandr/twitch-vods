@@ -1,11 +1,12 @@
 import pytest
 import asyncio
+import os
 from discord import Embed
 
 from modules.notifier import Notifier
 
 LOOP = asyncio.get_event_loop()
-NOTIFIER = Notifier(LOOP)
+NOTIFIER = Notifier(LOOP, webhook_url=os.environ['WEBHOOK_URL'])
 
 @pytest.mark.skip
 def test_send_notification():

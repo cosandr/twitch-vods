@@ -2,52 +2,59 @@ import asyncio
 import json
 import logging
 import os
-import pickle
 import re
 import signal
 from typing import Optional
 
-from aiohttp import ClientSession
+from aiohttp import ClientSession, UnixConnector
 from discord import Embed, Colour
 
-import config as cfg
 from modules.notifier import Notifier
 from . import LOGGER, StreamData, InvalidResponseError, UserData
 
 NAME = 'Twitch Recorder'
-ICON_URL = 'https://www.dresrv.com/icons/twitch-recorder.png'
+ICON_URL = 'https://raw.githubusercontent.com/cosandr/twitch-vods/master/icons/recorder.png'
 
 
 # noinspection PyBroadException
 class Recorder:
     dumps_path = 'log/dumps'
 
-    def __init__(self, loop: asyncio.AbstractEventLoop, dry_run=False, no_notifications=False, **kwargs):
+    def __init__(self, loop: asyncio.AbstractEventLoop, **kwargs):
         self.loop = loop
-        self.dry_run = dry_run
-        user_login = kwargs.pop('user')
-        self.twitch_id: str = kwargs.pop('twitch_id')
-        self.timeout: int = int(kwargs.pop('timeout', 120))
-        self.out_path: str = kwargs.pop('out_path', '.')
+        enable_notifications: bool = not kwargs.get('no_notifications', False)
+        self.dry_run: bool = kwargs.get('dry_run', False)
         self.enc_path: str = kwargs.pop('enc_path', 'http://127.0.0.1:3626')
-        self.check_en = asyncio.Event()
-        self.user: Optional[UserData] = None
-        self.stream: Optional[StreamData] = None
+        self.notifier: Optional[Notifier] = kwargs.pop('notifier', None)
+        self.out_path: str = kwargs.pop('out_path', '.')
+        self.timeout: int = int(kwargs.pop('timeout', 120))
+        self.twitch_id: str = kwargs.pop('twitch_id')
+        user_login = kwargs.pop('user')
         self.aio_sess: Optional[ClientSession] = None
-        self.notifier: Optional[Notifier] = None
+        self.check_en = asyncio.Event()
         self.ended_ok = False
+        self.notifier: Optional[Notifier] = None
+        self.stream: Optional[StreamData] = None
+        self.unix_sess: Optional[ClientSession] = None
+        self.user: Optional[UserData] = None
         signal.signal(signal.SIGTERM, self.signal_handler)
         # --- Logger ---
         self.logger = logging.getLogger(f'{LOGGER.name}.{user_login}')
         self.logger.setLevel(logging.DEBUG)
+        kwargs['log_parent'] = self.logger.name
         # --- Logger ---
         self.loop.run_until_complete(self.async_init(user_login))
-        if not no_notifications:
-            try:
-                self.notifier = Notifier(loop=self.loop, log_parent=self.logger.name, sess=self.aio_sess,
-                                         webhook_url=kwargs.pop('webhook_url'))
-            except Exception:
-                pass
+
+        if enable_notifications:
+            if not self.notifier:
+                try:
+                    self.notifier = Notifier(loop=self.loop, **kwargs)
+                except Exception:
+                    self.logger.exception('Cannot initialize Notifier')
+            else:
+                self.notifier = None
+                self.logger.info('No notifications')
+
         # Check args
         if not os.path.exists(self.out_path):
             self.logger.warning('%s does not exist', self.out_path)
@@ -67,6 +74,9 @@ class Recorder:
     async def async_init(self, user_login):
         self.logger.debug("aiohttp session initialized.")
         self.aio_sess = ClientSession()
+        if self.enc_path.startswith('/'):
+            self.unix_sess = ClientSession(connector=UnixConnector(path=self.enc_path))
+            self.logger.debug("Unix session initialized.")
         self.user = await self.get_user_id(user_login)
         if not self.user:
             self.logger.critical('Cannot find user %s', user_login)
@@ -114,20 +124,6 @@ class Recorder:
         except Exception:
             self.logger.exception('Cannot send notification')
             return False
-
-    async def open_conn(self) -> asyncio.StreamWriter:
-        try:
-            if cfg.TCP:
-                self.logger.debug("Connecting to TCP server at %s:%d", self.enc_path, cfg.TCP_PORT)
-                _, writer = await asyncio.open_connection(self.enc_path, cfg.TCP_PORT)
-            else:
-                self.logger.debug(f'Connecting to Unix socket at {cfg.SOCKET_FILE}')
-                _, writer = await asyncio.open_unix_connection(cfg.SOCKET_FILE)
-            self.logger.info("Connected to encoder")
-            return writer
-        except Exception as e:
-            self.logger.error("Could not connect to encoder: %s", str(e))
-            raise
 
     async def timer(self, timeout=None):
         if timeout is None:
@@ -192,6 +188,21 @@ class Recorder:
                 raise InvalidResponseError(resp.status, resp.reason, data)
         return data
 
+    async def http_post_json(self, url: str, **kwargs):
+        if kwargs.get('data'):
+            kwargs['data'] = json.dumps(kwargs['data'])
+        if self.unix_sess:
+            sess = self.unix_sess
+            url = f'http://unix{url}'
+        else:
+            sess = self.aio_sess
+            url = f'{self.enc_path}{url}'
+        async with sess.post(url, **kwargs) as resp:
+            data = await resp.json()
+            if resp.status != 200:
+                raise InvalidResponseError(resp.status, resp.reason, data)
+        return data
+
     async def check_if_live(self):
         """
         1. Check for host
@@ -241,7 +252,8 @@ class Recorder:
         self.check_en.clear()
         no_space_title = re.sub(r'[^a-zA-Z0-9]+', '_', self.stream.title)
         rec_name = f"{self.stream.created_at_str}_{self.user.name}_{no_space_title}"
-        raw_fp = os.path.join(self.out_path, f'{rec_name}.flv')
+        raw_name = f'{rec_name}.flv'
+        raw_fp = os.path.join(self.out_path, raw_name)
         self.logger.info('Saving raw stream to %s', raw_fp)
         if self.dry_run:
             self.logger.info('Dry run, do not run streamlink')
@@ -256,32 +268,21 @@ class Recorder:
                 self.loop.create_task(self.timer())
                 return
             self.logger.info("Premature exit but raw file exists.")
-        await self.post_record(raw_fp)
+        await self.post_record(raw_name)
 
-    async def post_record(self, raw_fp: str):
+    async def post_record(self, raw_name: str):
         # Title without illegal NTFS characters, no extra spaces and no trailing whitespace
         win_title = re.sub(r'(\s{2,}|\s+$|[<>:\"/\\|?*\n]+)', '', self.stream.title)
         conv_name = f"{self.stream.created_at_str}_{win_title}"
         # Send job to encoder
-        send_dict = {'src': raw_fp, 'file_name': conv_name, 'user': self.user.name, 'raw': True}
+        send_dict = {'src': raw_name, 'file_name': conv_name, 'user': self.user.name, 'raw': True}
         try:
-            await self.send_job(send_dict)
+            await self.http_post_json(url='/job/run', data=send_dict, params=dict(immediate='true'))
         except Exception as e:
-            self.logger.error(f'{e}: src {raw_fp}, file_name {conv_name}, user {self.user.name}')
+            self.logger.error(f'{e}: src {raw_name}, file_name {conv_name}, user {self.user.name}')
             embed = self.make_embed_error('Failed to send job to encoder', e=e)
             await self.send_notification(embed=embed)
         self.loop.create_task(self.timer())
-
-    async def send_job(self, job: dict):
-        writer = await self.open_conn()
-        if cfg.JSON_SERIALIZE:
-            writer.write(json.dumps(job).encode('utf-8'))
-        else:
-            writer.write(pickle.dumps(job))
-        await writer.drain()
-        writer.close()
-        await writer.wait_closed()
-        self.logger.info("Socket connection closed")
 
     async def run(self, cmd: str):
         p = await asyncio.create_subprocess_shell(cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)

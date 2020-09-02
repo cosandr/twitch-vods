@@ -6,7 +6,7 @@ import re
 import signal
 import uuid
 from datetime import datetime, timedelta
-from typing import Dict
+from typing import Dict, Optional
 
 import asyncpg
 
@@ -42,49 +42,26 @@ class Generator:
         GRANT SELECT ON {psql_table_name} TO discord;
     """
 
-    def __init__(self, loop: asyncio.AbstractEventLoop):
+    def __init__(self, loop: asyncio.AbstractEventLoop, **kwargs):
         self.loop = loop
+        self.pg_uri: str = kwargs.pop('pg_uri')
+        self.src_paths: Dict[str, str] = kwargs.pop('src_paths')
+        self.out_path: str = kwargs.pop('out_path')
         self.uuid_dict = {}
         # Postgres connection string <user>:<pass>@<host>:<port>/<db>
-        self.pg_uri: str = ''
-        # noinspection PyTypeChecker
-        self.conn: asyncpg.Connection = None
-        self.src_paths: Dict[str, str] = {}
-        self.dst_path: str = ''
+        self.conn: Optional[asyncpg.Connection] = None
         # --- Logger ---
         self.logger: logging.Logger = logging.getLogger(self.__class__.__name__)
         self.logger.setLevel(logging.DEBUG)
         setup_logger(self.logger, 'uuid')
         # --- Logger ---
         signal.signal(signal.SIGTERM, self.signal_handler)
-        self.get_env()
         self.loop.run_until_complete(self.async_init())
         self.logger.info("Generator started with PID %d", os.getpid())
 
-    def signal_handler(self, signal_num, frame):
+    def signal_handler(self, _signal_num, _frame):
         self.loop.run_until_complete(self.close())
         exit(0)
-
-    def get_env(self):
-        self.pg_uri = os.getenv('PG_URI')
-        self.dst_path = os.getenv('PATH_DST')
-        for k, v in os.environ.items():
-            if k.startswith('PATH_SRC'):
-                # Source folder format `[TYPE]PATH`
-                if m := re.match(r'\[(?P<type>\w+)\](?P<path>.+)', v):
-                    if not os.path.exists(m.group('path')):
-                        self.logger.critical('Source directory cannot be found: %s', v)
-                        exit(0)
-                    self.src_paths[m.group('type')] = m.group('path')
-        if not self.dst_path:
-            self.logger.critical('Missing PATH_DST variable')
-            exit(0)
-        if not self.src_paths:
-            self.logger.critical('Missing PATH_SRC variable(s)')
-            exit(0)
-        if not self.pg_uri:
-            self.logger.critical('Missing PG_URI Postgres connection URI')
-            exit(0)
 
     async def async_init(self):
         self.conn = await asyncpg.connect(dsn=f'postgres://{self.pg_uri}')
@@ -119,8 +96,8 @@ class Generator:
 
     async def replace_all(self):
         # Clear existing links
-        for file in os.listdir(self.dst_path):
-            os.unlink(os.path.join(self.dst_path, file))
+        for file in os.listdir(self.out_path):
+            os.unlink(os.path.join(self.out_path, file))
 
         self.logger.info("Old links deleted")
         # Create links
@@ -129,7 +106,7 @@ class Generator:
             for file in os.listdir(v):
                 if file.endswith('.mp4'):
                     tmp_uuid = uuid.uuid1()
-                    tmp_link = os.path.join(self.dst_path, tmp_uuid.hex)
+                    tmp_link = os.path.join(self.out_path, tmp_uuid.hex)
                     os.symlink(os.path.join(v, file), tmp_link)
                     created_dt = get_datetime(name=file, path=v)
                     md5 = self.get_md5(os.path.join(v, file))
@@ -154,7 +131,7 @@ class Generator:
                     ten_min_ago = datetime.today() - timedelta(minutes=10)
                     if created_dt > ten_min_ago:
                         tmp_uuid = uuid.uuid1().hex
-                        tmp_link = os.path.join(self.dst_path, tmp_uuid)
+                        tmp_link = os.path.join(self.out_path, tmp_uuid)
                         os.symlink(os.path.join(v, file), tmp_link)
                         md5 = self.get_md5(os.path.join(v, file))
                         async with self.conn.transaction():

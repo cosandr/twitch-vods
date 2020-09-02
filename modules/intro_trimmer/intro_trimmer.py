@@ -1,36 +1,25 @@
 import logging
 import os
 import time
-from typing import List
+from typing import List, Optional
 
 import cv2
 import numpy as np
 from skimage.metrics import structural_similarity
 
 from utils import run_ffmpeg, setup_logger
+from .config import Config
+from .utils import crop_to_regions
 
 
-class Cropper:
-
-    check_areas = [
-        # Big banner at the bottom
-        {
-            'start': [0, 298],
-            'size': [640, 52],
-        },
-        # Your hosts and timer
-        {
-            'start': [499, 248],
-            'size': [137, 40],
-        },
-    ]
-
-    def __init__(self, tol: int = 10, initial_gap: int = 300, debug: int = 0, log_parent=''):
-        self.debug = debug
+class IntroTrimmer:
+    def __init__(self, cfg_path: str, **kwargs):
+        self.debug: int = kwargs.get('debug', 0)
+        log_parent: str = kwargs.get('log_parent', '')
         # Seconds of accuracy to use when searching for intro
-        self.tol = tol
+        self.tol: int = kwargs.pop('tol', 10)
         # Seconds to skip forwards the first time
-        self.initial_gap = initial_gap
+        self.initial_gap: int = kwargs.pop('initial_gap', 300)
         # --- Logger ---
         logger_name = self.__class__.__name__
         if log_parent:
@@ -41,58 +30,56 @@ class Cropper:
             setup_logger(self.logger, 'cropper')
         # --- Logger ---
         self.logger.info("Video cropper started with PID %d", os.getpid())
-        # Load reference frame data
-        ref_file = 'data/crop-reference.png'
-        if not os.path.exists(ref_file):
-            raise FileNotFoundError('Reference file not found')
-        self.ref = cv2.imread(ref_file, cv2.IMREAD_GRAYSCALE)
-        self.ref_regions = self._crop_to_regions(self.ref)
+        # Load config
+        self.cfg: List[Config] = Config.from_json(cfg_path)
+
+    def get_cfg(self, name: str) -> Optional[Config]:
+        for c in self.cfg:
+            if c.re.search(name):
+                return c
+        return None
 
     async def run_crop(self, file: str, out_file: str):
         """Find intro start and crop out start idle period"""
         # ffmpeg -ss 00:01:00 -i input.mp4 -c copy output.mp4
         intro_seconds = self.find_intro(file=file)
+        if intro_seconds is None:
+            raise RuntimeError(f'No trim definition for {file}')
         args = ['-ss', str(intro_seconds), '-i', file, '-c', 'copy', out_file]
         try:
             await run_ffmpeg(logger=self.logger, args=args)
         except Exception as e:
             self.logger.error('Failed to trim %s from %d seconds: %s', file, intro_seconds, str(e))
 
-    def is_start_wait(self, file: str, check_time: int) -> bool:
+    def is_start_wait(self, file: str, check_time: int, cfg: Config) -> bool:
         """Return True is image is determined to be idle period before intro"""
-        r_img = self._crop_to_regions(self.extract_frame(file, seconds=check_time))
+        r_img = crop_to_regions(self.extract_frame(file, seconds=check_time), cfg.check_areas)
         errors = []
-        for i in range(len(self.ref_regions)):
-            err = structural_similarity(self.ref_regions[i], r_img[i])
+        for i in range(len(cfg.regions)):
+            err = structural_similarity(cfg.regions[i], r_img[i])
             errors.append(err)
         self.logger.debug('Similarity [avg %s]: %s', np.average(errors), errors)
         if np.average(errors) < 0.6:
             return False
         return True
 
-    def _crop_to_regions(self, img: np.ndarray) -> List[np.ndarray]:
-        """Returns regions defined by check_areas"""
-        ret = []
-        for region in self.check_areas:
-            from_x = region['start'][0]
-            from_y = region['start'][1]
-            to_x = from_x + region['size'][0]
-            to_y = from_y + region['size'][1]
-            # Don't overflow
-            to_x = to_x if to_x < img.shape[1] else img.shape[1] - 1
-            to_y = to_y if to_y < img.shape[0] else img.shape[0] - 1
-            ret.append(img[from_y:to_y, from_x:to_x])
-        return ret
-
-    def find_intro(self, file: str, test: int = 0) -> int:
-        """Returns time in seconds where the intro starts"""
+    def find_intro(self, file: str, test: int = 0) -> Optional[int]:
+        """
+        Returns time in seconds where the intro starts
+        Returns None if we don't have a definition for the file
+        """
+        cfg: Optional[Config] = self.get_cfg(file)
+        if not cfg and not test:
+            return None
         curr_t = 0
         gap = self.initial_gap
         # Assume start is intro
         prev_is_intro = True
         if test:
-            # Return True when t is smaller than test seconds
-            is_start_wait = lambda f, t: True if t < test else False
+            def _is_start_wait(_f, t, _cfg):
+                """Return True when t is smaller than test seconds"""
+                return t < test
+            is_start_wait = _is_start_wait
         else:
             is_start_wait = self.is_start_wait
         max_iter = 20
@@ -100,7 +87,7 @@ class Cropper:
         start = time.perf_counter()
         while True:
             curr_t += gap
-            curr_is_intro = is_start_wait(file, curr_t)
+            curr_is_intro = is_start_wait(file, curr_t, cfg)
             if self.debug > 0:
                 self.logger.debug('%d: was %s, is %s, gap %d', curr_t, prev_is_intro, curr_is_intro, gap)
             if abs(gap) <= self.tol:

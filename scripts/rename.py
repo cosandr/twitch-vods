@@ -15,7 +15,7 @@ for file in os.listdir(path):
     #     print(F"{file} -> {newname}")
     #     os.rename(file, newname)
     # 18-10-18_1303
-    if (file.endswith(".mp4")):
+    if file.endswith(".mp4"):
         tmp_split = file.split('_')
         time = tmp_split[1].split('-')
         newtime = ''.join(time)

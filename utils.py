@@ -7,13 +7,12 @@ from datetime import datetime, timedelta
 from logging.handlers import RotatingFileHandler
 from typing import AsyncIterable, Union, Optional
 
-import config as cfg
-
 try:
     import cv2
 except ImportError:
     print('OpenCV not available')
 
+TIME_FMT = '%y%m%d-%H%M'
 
 re_watch = {
     'frame': re.compile(r'frame=(\d+)'),
@@ -135,7 +134,7 @@ def get_datetime(name, path='.') -> Optional[datetime]:
         ValueError (Time format does not match filename)
         FileNotFoundError (Cannot get modified time from OS)"""
     if m := re.search(r'\d{6}-\d{4}', name):
-        return datetime.strptime(m.group(), cfg.TIME_FMT)
+        return datetime.strptime(m.group(), TIME_FMT)
     return datetime.fromtimestamp(os.path.getmtime(os.path.join(path, name)))
 
 

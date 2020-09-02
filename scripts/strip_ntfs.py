@@ -4,7 +4,7 @@ import re
 path = '/mnt/vods/RichardLewisReports'
 for file in os.listdir(path):
     oldname = F"{path}/{file}"
-    if (file.endswith(".mp4")):
+    if file.endswith(".mp4"):
         newname = re.sub(r'[<>:"\/\\|?*\n]+', '', file)
         if newname == file:
             continue

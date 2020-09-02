@@ -10,7 +10,7 @@ import traceback
 from datetime import datetime, timedelta
 from typing import List
 
-from modules import Cropper, Recorder
+from modules import IntroTrimmer, Recorder
 from utils import read_video_info_cv2
 
 FFMPEG_COPY = '-i {0} -err_detect ignore_err -f mp4 -c:a aac -c:v copy -y -progress - -nostats -hide_banner {1}'
@@ -181,12 +181,12 @@ if __name__ == "__main__":
     # args = FFMPEG_HEVC_LIST.format('/tank/media/test/Doctor.Strange.CLIP.mkv', 'output.mkv').split(' ')
     # args_streamlink = STREAMLINK_LIST.format(url, 'stream.flv').split(' ')
     # args_stream = FFMPEG_COPY.format(get_stream_url(url), 'stream.mp4').split(' ')
-    crop = Cropper(debug=2)
+    crop = IntroTrimmer(debug=2, cfg_path='data/trimmer/config.json')
     media_path = '/tank/media'
     if platform.system() == 'Windows':
-        media_path = 'Z:/media'
+        media_path = 'T:/media'
     elif platform.node() != 'DreSRV':
-        media_path = f'/mnt/sshfs{media_path}'
+        media_path = f'/dresrv{media_path}'
     in_file = f'{media_path}/twitch/RichardLewisReports/200220-2246_Return Of By The Numbers #108.mp4'
     out_file = f'{media_path}/twitch_raw/test.mp4'
     try:

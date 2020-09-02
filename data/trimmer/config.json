@@ -1,0 +1,29 @@
+[
+  {
+    "pattern": "by\\s*the\\s*numbers",
+    "pattern_opt": "IGNORECASE",
+    "image": "btn.png",
+    "check_areas": [
+      {
+        "start": [
+          0,
+          298
+        ],
+        "size": [
+          640,
+          52
+        ]
+      },
+      {
+        "start": [
+          499,
+          248
+        ],
+        "size": [
+          137,
+          40
+        ]
+      }
+    ]
+  }
+]

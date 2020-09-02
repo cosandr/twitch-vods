@@ -3,7 +3,9 @@
 import argparse
 import asyncio
 import os
+import re
 import traceback
+from typing import Dict
 
 from modules import Encoder, Recorder, Generator, Notifier, Cleaner
 
@@ -23,42 +25,164 @@ def merge_env_args(env_map: dict, args: argparse.Namespace) -> dict:
     # Read from arguments, overrides env vars
     for k, v in vars(args).items():
         if k in env_map and v is not None:
-            kwargs[k] = v
+            if k.endswith('pattern_opt'):
+                opts = [getattr(re, name) for name in v]
+                kwargs[k] = opts
+            else:
+                kwargs[k] = v
     return kwargs
+
+
+def run_cleaner(args: argparse.Namespace):
+    env_map = {
+        "no_notifications": None,
+        "clean_days": None,
+        "warn_at": None,
+        "webhook_url": "WEBHOOK_URL",
+    }
+    kwargs = merge_env_args(env_map, args)
+    inst = Cleaner(LOOP, check_path=args.path, **kwargs)
+    inst.worker_task = LOOP.create_task(inst.worker())
+    inst.en_del.set()
+    LOOP.run_until_complete(inst.worker_task)
+
+
+def run_encoder(args: argparse.Namespace):
+    env_map = {
+        "clean_days": None,
+        "copy_pattern": None,
+        "copy_pattern_opt": None,
+        "dry_run": None,
+        "out_path": "ENC_OUT",
+        "enable_cleaner": None,
+        "hevc_pattern": None,
+        "hevc_pattern_opt": None,
+        "listen_address": "ENC_LISTEN_ADDRESS",
+        "no_notifications": None,
+        "print_every": None,
+        "src_path": "ENC_SRC",
+        "warn_at": None,
+        "webhook_url": "WEBHOOK_URL",
+    }
+    kwargs = merge_env_args(env_map, args)
+    inst = Encoder(LOOP, **kwargs)
+    inst.run_app()
+
+
+def run_generator(args: argparse.Namespace):
+    env_map = {
+        "pg_uri": "GEN_PG_URI",
+        "out_path": "GEN_DST",
+    }
+    kwargs = merge_env_args(env_map, args)
+    re_path = re.compile(r'\[(?P<type>\w+)\](?P<path>.+)')
+    src_paths: Dict[str, str] = {}
+    if args.src:
+        check_paths = args.src
+    else:
+        check_paths = [v for k, v in os.environ.items() if k.startswith('GEN_SRC')]
+    for v in check_paths:
+        if m := re_path.match(v):
+            if not os.path.exists(m.group('path')):
+                print(f'Source directory cannot be found: {v}')
+                exit(0)
+            src_paths[m.group('type')] = m.group('path')
+    kwargs['src_paths'] = src_paths
+    if not kwargs.get('pg_uri'):
+        raise RuntimeError('PostgreSQL URI is required')
+    elif not kwargs.get('src_paths'):
+        raise RuntimeError('Source path(s) required')
+    elif not kwargs.get('out_path'):
+        raise RuntimeError('Output path required')
+    inst = Generator(LOOP, **kwargs)
+    LOOP.run_until_complete(inst.replace_all())
+    try:
+        LOOP.run_until_complete(inst.check_new_files())
+    except KeyboardInterrupt:
+        inst.logger.info("Keyboard interrupt, exit.")
+    except Exception as error:
+        traceback.print_exception(type(error), error, error.__traceback__)
+    LOOP.run_until_complete(inst.close())
+
+
+def run_notifier(args: argparse.Namespace):
+    env_map = {
+        "mention_id": "NOT_MENTION_ID",
+        "webhook_url": "WEBHOOK_URL",
+    }
+    kwargs = merge_env_args(env_map, args)
+    content = ' '.join(args.content)
+    inst = Notifier(LOOP, **kwargs)
+    LOOP.run_until_complete(inst.send(content=content))
 
 
 def run_recorder(args: argparse.Namespace):
     env_map = {
-        "user": "REC_USER",
-        "twitch_id": "REC_TWITCH_ID",
-        "timeout": "REC_TIMEOUT",
+        "dry_run": None,
+        "enc_path": "ENC_PATH",
+        "no_notifications": None,
         "out_path": "REC_OUT",
-        "enc_path": "ENC_LISTEN_ADDRESS",
+        "timeout": "REC_TIMEOUT",
+        "twitch_id": "REC_TWITCH_ID",
+        "user": "REC_USER",
+        "webhook_url": "WEBHOOK_URL",
     }
     kwargs = merge_env_args(env_map, args)
-    r = Recorder(loop=LOOP, no_notifications=args.no_notifications, **kwargs)
+    inst = Recorder(loop=LOOP, **kwargs)
     while True:
         try:
-            LOOP.run_until_complete(r.check_if_live())
+            LOOP.run_until_complete(inst.check_if_live())
         except KeyboardInterrupt:
-            r.logger.info("Keyboard interrupt, exit.")
+            inst.logger.info("Keyboard interrupt, exit.")
             break
         except Exception as error:
             traceback.print_exception(type(error), error, error.__traceback__)
             pass
-    LOOP.run_until_complete(r.close())
+    LOOP.run_until_complete(inst.close())
 
 
 parser = argparse.ArgumentParser(description='Launcher for twitch recorder stuff')
 # Global options
-parser.add_argument('--no_notifications', action='store_true', default=False,
-                    help='Disable Discord notifications')
-parser.add_argument('-n', '--dry_run', action='store_true', default=False,
-                    help='Do not change any files')
+grp_global = parser.add_argument_group(title='Global options')
+grp_global.add_argument('-n', '--dry_run', action='store_true', default=False, help='Do not change any files')
+grp_global.add_argument('--no_notifications', action='store_true', default=False, help='Disable Discord notifications')
+grp_global.add_argument('--webhook_url', type=str, help='Discord webhook URL')
 
-subparsers = parser.add_subparsers(title='Commands')
+# Cleaner options
+grp_cleaner = parser.add_argument_group(title='Cleaner options', description='Applies to standalone cleaner and encoder')
+grp_cleaner.add_argument('-d', '--clean_days', type=int, required=False, help='How many days until a file gets deleted')
+grp_cleaner.add_argument('-w', '--warn_at', type=int, action='append', help='Hours before deletion time to send notifications')
 
-parser_rec = subparsers.add_parser('recorder')
+subparsers = parser.add_subparsers(title='Commands', required=True)
+
+parser_cln = subparsers.add_parser('cleaner', help='Start cleaner, usually started by encoder')
+parser_cln.add_argument('-p', '--path', type=str, required=True, help='Path to check')
+parser_cln.set_defaults(func=run_cleaner)
+
+parser_enc = subparsers.add_parser('encoder', help='Start encoder REST API server')
+parser_enc.add_argument('-i', '--src_path', type=str, help='Source file location')
+parser_enc.add_argument('-o', '--out_path', type=str, help='Processed file location')
+parser_enc.add_argument('--copy_pattern', type=str, required=False, help='Regex pattern for copying files')
+parser_enc.add_argument('--copy_pattern_opt', type=str, action='append', help='Python Regex compile options, case sensitive')
+parser_enc.add_argument('--enable_cleaner', action='store_true', help='Delete old files not included in processing pattern')
+parser_enc.add_argument('--hevc_pattern', type=str, required=False, help='Regex pattern for HEVC transcoding, takes precedence')
+parser_enc.add_argument('--hevc_pattern_opt', type=str, action='append', help='Python Regex compile options, case sensitive')
+parser_enc.add_argument('--listen_address', type=str, required=False, help='Absolute path (socket) or IP:PORT')
+parser_enc.add_argument('--print_every', action='store_true', help='Print progress after encoding X seconds')
+parser_enc.set_defaults(func=run_encoder)
+
+parser_gen = subparsers.add_parser('generator', help='Start UUID generator')
+parser_gen.add_argument('-i', '--src', type=str, action='append', help='Source path, formatted as [<type>]<path>')
+parser_gen.add_argument('-o', '--out_path', type=str, required=False, help='Path where symlinks are placed')
+parser_gen.add_argument('-p', '--pg_uri', type=str, required=False, help='PostgreSQL URI')
+parser_gen.set_defaults(func=run_generator)
+
+parser_not = subparsers.add_parser('notifier', help='Start Discord notifier, primarily for testing')
+parser_not.add_argument('-c', '--content', nargs='+', required=True, help='Content to send')
+parser_not.add_argument('-m', '--mention-id', type=str, help='User ID to mention')
+parser_not.set_defaults(func=run_notifier)
+
+parser_rec = subparsers.add_parser('recorder', help='Start Twitch recorder')
 parser_rec.add_argument('-u', '--user', type=str, required=False, help='User to record')
 parser_rec.add_argument('-tid', '--twitch_id', type=str, required=False, help='Twitch API Client-ID')
 parser_rec.add_argument('-t', '--timeout', type=int, required=False, help='Time between live checks')
@@ -73,64 +197,3 @@ if __name__ == '__main__':
             os.mkdir(folder)
     _args = parser.parse_args()
     _args.func(_args)
-    exit(0)
-    # if args.cmd == 'encoder':
-    #     encoder = Encoder(loop=loop, convert_non_btn=args.convert_non_btn, always_copy=args.always_copy,
-    #                       print_every=args.print_every, enable_notifications=not args.no_notifications,
-    #                       dry_run=args.dry_run, manual_run=args.manual)
-    #     manual_ran = False
-    #     while True:
-    #         if manual_ran:
-    #             break
-    #         try:
-    #             if args.manual and args.job_num is not None:
-    #                 manual_ran = True
-    #                 encoder.mark_job(args.job_num)
-    #             loop.run_until_complete(encoder.job_wait())
-    #         except KeyboardInterrupt:
-    #             encoder.logger.info("Keyboard interrupt, exit.")
-    #             break
-    #         except Exception as error:
-    #             traceback.print_exception(type(error), error, error.__traceback__)
-    #             pass
-    #     # Stop server
-    #     loop.run_until_complete(encoder.close())
-    # elif args.cmd == 'recorder':
-    #     rec = Recorder(loop, enable_notifications=not args.no_notifications)
-    #     while True:
-    #         try:
-    #             loop.run_until_complete(rec.check_if_live())
-    #         except KeyboardInterrupt:
-    #             rec.logger.info("Keyboard interrupt, exit.")
-    #             break
-    #         except Exception as error:
-    #             traceback.print_exception(type(error), error, error.__traceback__)
-    #             pass
-    #     loop.run_until_complete(rec.close())
-    # elif args.cmd == 'uuid':
-    #     gen = Generator(loop)
-    #     loop.run_until_complete(gen.replace_all())
-    #     try:
-    #         loop.run_until_complete(gen.check_new_files())
-    #     except KeyboardInterrupt:
-    #         gen.logger.info("Keyboard interrupt, exit.")
-    #     except Exception as error:
-    #         traceback.print_exception(type(error), error, error.__traceback__)
-    #     loop.run_until_complete(gen.close())
-    # elif args.cmd == 'notifier':
-    #     if not args.content:
-    #         raise Exception('Content is required')
-    #     content = ' '.join(args.content)
-    #     notifier = Notifier(loop, tcp_host=args.tcp_host, tcp_port=args.tcp_port)
-    #     loop.run_until_complete(notifier.send(content=content))
-    # elif args.cmd == 'cleaner':
-    #     if not args.content:
-    #         raise Exception('Content is required (path to check)')
-    #     content = ' '.join(args.content)
-    #     cleaner = Cleaner(loop, check_path=content, enable_notifications=not args.no_notifications,
-    #                       dry_run=args.dry_run)
-    #     cleaner.worker_task = loop.create_task(cleaner.worker())
-    #     cleaner.en_del.set()
-    #     loop.run_until_complete(cleaner.worker_task)
-    # else:
-    #     print(f'Unrecognized command {args.cmd}')
