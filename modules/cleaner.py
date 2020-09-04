@@ -27,11 +27,12 @@ class Cleaner:
     def __init__(self, loop: asyncio.AbstractEventLoop, check_path: str, **kwargs):
         self.loop = loop
         self.check_path: str = check_path
-        self.dry_run: bool = kwargs.get('dry_run', False)
         enable_notifications: bool = not kwargs.get('no_notifications', False)
         log_parent: str = kwargs.get('log_parent', '')
         self.clean_days: int = kwargs.pop('clean_days', 7)
+        self.dry_run: bool = kwargs.get('dry_run', False)
         self.notifier: Optional[Notifier] = kwargs.pop('notifier', None)
+        self.time_format: str = kwargs.get('time_format', '%y%m%d-%H%M')
         warn_at: Optional[List[int]] = kwargs.pop('warn_at', None)
         if warn_at:
             self.warn_at: List[int] = sorted(warn_at, reverse=True)
@@ -134,7 +135,7 @@ class Cleaner:
             if n in self.blacklist:
                 continue
             try:
-                file_dt = get_datetime(n, self.check_path)
+                file_dt = get_datetime(n, self.time_format, self.check_path)
                 if not isinstance(file_dt, datetime):
                     raise ValueError(f"Expected datetime, got {type(file_dt)}: {file_dt}")
                 self.logger.info(f"{n} will be deleted at {file_dt}")

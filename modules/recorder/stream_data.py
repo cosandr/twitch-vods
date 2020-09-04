@@ -1,6 +1,8 @@
-from typing import Optional
 from datetime import datetime, timezone
+from typing import Optional
+
 from dateutil.parser import isoparse
+
 from . import LOGGER
 
 
@@ -21,6 +23,7 @@ class StreamData:
 
     @created_at_str.setter
     def created_at_str(self, time_fmt: str):
+        """Format created_at with given time format string"""
         self._created_at_str = self.created_at.strftime(time_fmt)
 
     @classmethod

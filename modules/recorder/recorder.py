@@ -9,6 +9,7 @@ from typing import Optional
 from aiohttp import ClientSession, UnixConnector
 from discord import Embed, Colour
 
+from modules.encoder import Job
 from modules.notifier import Notifier
 from . import LOGGER, StreamData, InvalidResponseError, UserData
 
@@ -27,6 +28,7 @@ class Recorder:
         self.enc_path: str = kwargs.pop('enc_path', 'http://127.0.0.1:3626')
         self.notifier: Optional[Notifier] = kwargs.pop('notifier', None)
         self.out_path: str = kwargs.pop('out_path', '.')
+        self.time_format: str = kwargs.get('time_format', '%y%m%d-%H%M')
         self.timeout: int = int(kwargs.pop('timeout', 120))
         self.twitch_id: str = kwargs.pop('twitch_id')
         user_login = kwargs.pop('user')
@@ -188,16 +190,14 @@ class Recorder:
                 raise InvalidResponseError(resp.status, resp.reason, data)
         return data
 
-    async def http_post_json(self, url: str, **kwargs):
-        if kwargs.get('data'):
-            kwargs['data'] = json.dumps(kwargs['data'])
+    async def http_post_data(self, url: str, data: str, **kwargs):
         if self.unix_sess:
             sess = self.unix_sess
             url = f'http://unix{url}'
         else:
             sess = self.aio_sess
             url = f'{self.enc_path}{url}'
-        async with sess.post(url, **kwargs) as resp:
+        async with sess.post(url, data=data, **kwargs) as resp:
             data = await resp.json()
             if resp.status != 200:
                 raise InvalidResponseError(resp.status, resp.reason, data)
@@ -236,6 +236,7 @@ class Recorder:
             self.loop.create_task(self.timer(600))
             self.check_en.clear()
             return
+        self.stream.created_at_str = self.time_format
         self.logger.info('%s is live: %s', self.user.display_name, self.stream.title)
         # --- Send notification ---
         embed = self.make_embed()
@@ -271,15 +272,12 @@ class Recorder:
         await self.post_record(raw_name)
 
     async def post_record(self, raw_name: str):
-        # Title without illegal NTFS characters, no extra spaces and no trailing whitespace
-        win_title = re.sub(r'(\s{2,}|\s+$|[<>:\"/\\|?*\n]+)', '', self.stream.title)
-        conv_name = f"{self.stream.created_at_str}_{win_title}"
         # Send job to encoder
-        send_dict = {'src': raw_name, 'file_name': conv_name, 'user': self.user.name, 'raw': True}
+        job = Job(input=raw_name, title=self.stream.title, user=self.user.display_name, created_at=self.stream.created_at)
         try:
-            await self.http_post_json(url='/job/run', data=send_dict, params=dict(immediate='true'))
+            await self.http_post_data(url='/job/run', data=job.to_json(), params=dict(immediate='true'))
         except Exception as e:
-            self.logger.error(f'{e}: src {raw_name}, file_name {conv_name}, user {self.user.name}')
+            self.logger.error(f'{e}\n{job.to_json(indent=2)}')
             embed = self.make_embed_error('Failed to send job to encoder', e=e)
             await self.send_notification(embed=embed)
         self.loop.create_task(self.timer())

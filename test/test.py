@@ -10,9 +10,10 @@ import traceback
 from datetime import datetime, timedelta
 from typing import List
 
-from modules import IntroTrimmer, Recorder
+from modules import IntroTrimmer
 from utils import read_video_info_cv2
 
+TIME_FMT = '%y%m%d-%H%M'
 FFMPEG_COPY = '-i {0} -err_detect ignore_err -f mp4 -c:a aac -c:v copy -y -progress - -nostats -hide_banner {1}'
 FFMPEG_HEVC = 'ffmpeg -i "{0}" -c:v libx265 -x265-params crf=23:pools=4 -preset:v fast -c:a aac -v warning -y -progress - -nostats -hide_banner "{1}"'
 FFMPEG_HEVC_LIST = '-i {0} -c:v libx265 -x265-params crf=23:pools=6 -preset:v medium -c:a aac -v warning -y -progress - -nostats -hide_banner {1}'
@@ -139,7 +140,7 @@ async def find_concat(logger: logging.Logger, path: str, use_mtime: bool = True)
             tmp = [curr_name]
             continue
         fp = os.path.join(path, f)
-        start_dt = datetime.strptime(m.group(), Recorder.time_fmt)
+        start_dt = datetime.strptime(m.group(), TIME_FMT)
         if use_mtime:
             curr_end = datetime.fromtimestamp(os.path.getmtime(fp))
         else:

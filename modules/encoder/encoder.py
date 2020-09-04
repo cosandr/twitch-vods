@@ -12,7 +12,7 @@ from aiohttp import web
 from discord import Embed, Colour
 
 from modules import Cleaner, IntroTrimmer, Notifier
-from utils import read_video_info, run_ffmpeg, setup_logger
+from utils import read_video_info, run_ffmpeg, setup_logger, get_datetime
 from . import Job, Response
 
 """
@@ -70,6 +70,7 @@ class Encoder:
         self.notifier: Optional[Notifier] = kwargs.pop('notifier', None)
         self.print_every: int = kwargs.pop('print_every', 30)
         self.src_path: str = kwargs.pop('src_path', '.')
+        self.time_format: str = kwargs.get('time_format', '%y%m%d-%H%M')
         trim_cfg_path: str = kwargs.pop('trim_cfg_path', 'data/trimmer/config.json')
         # --- Logger ---
         logger_name = self.__class__.__name__
@@ -78,6 +79,8 @@ class Encoder:
         setup_logger(self.logger, logger_name.lower())
         kwargs['log_parent'] = logger_name
         # --- Logger ---
+        # Removes illegal NTFS characters, extra spaces and trailing whitespace
+        self.re_ntfs = re.compile(r'(\s{2,}|\s+$|[<>:\"/\\|?*\n]+)')
         if self.hevc_pattern:
             self.re_hevc = re.compile(self.hevc_pattern, *self.hevc_pattern_opt)
         if self.copy_pattern:
@@ -208,43 +211,46 @@ class Encoder:
         # Create folder from username if needed
         out_path = os.path.join(self.out_path, job.user)
         if not os.path.exists(out_path):
-            os.mkdir(out_path)
-        will_hevc = self.re_hevc.search(job.file_name)
-        will_copy = self.re_copy.search(job.file_name)
+            os.mkdir(out_path, 0o750)
+        if not job.created_at:
+            job.created_at = get_datetime(job.input, self.time_format, self.src_path)
+        file_name = f'{job.created_at}_{self.re_ntfs.sub(job.title, "")}'
+        will_hevc = self.re_hevc.search(file_name)
+        will_copy = self.re_copy.search(file_name)
         if will_hevc:
             cmd = self.hevc_args.copy()
-            job.enc_file = job.file_name + '.mkv'
+            job.out_file = file_name + '.mkv'
             job.enc_codec = 'hevc'
         elif will_copy:
             cmd = self.copy_args.copy()
-            job.enc_file = job.file_name + '.mp4'
+            job.out_file = file_name + '.mp4'
             job.enc_codec = 'copy'
         else:
-            # Don't do anything to non-BTN files
             embed = self.make_embed()
             embed.title = 'Ignore'
-            embed.description = job.file_name
+            embed.description = job.title
             await self.send_notification(embed=embed)
-            self.logger.info(f'Ignoring job for {job.file_name}')
+            self.logger.info(f'Ignoring job for {job.input}')
             job.ignore = True
             self.write_jobs()
             self.update_cleaner()
             return
-        out_fp = os.path.join(out_path, job.enc_file)
+        in_fp = os.path.join(self.src_path, job.input)
+        out_fp = os.path.join(out_path, job.out_file)
         # Insert input
         cmd.insert(0, '-i')
-        cmd.insert(1, job.src)
+        cmd.insert(1, in_fp)
         # Append output file
         cmd.append(out_fp)
-        self.logger.info(f"Encoding {job.src} -> {out_fp}")
+        self.logger.info(f"Encoding {job.input} -> {job.out_file}")
         embed = self.make_embed()
         embed.title = 'Encode'
-        embed.add_field(name='Source', value=os.path.basename(job.src), inline=True)
-        embed.add_field(name='Target', value=job.enc_file, inline=True)
+        embed.add_field(name='Source', value=job.input, inline=True)
+        embed.add_field(name='Target', value=job.out_file, inline=True)
         # Trim intro if we can
-        if self.trimmer.get_cfg(job.src):
+        if self.trimmer.get_cfg(job.title):
             try:
-                intro_seconds = self.trimmer.find_intro(job.src)
+                intro_seconds = self.trimmer.find_intro(file_name)
                 cmd.insert(0, '-ss')
                 cmd.insert(1, str(intro_seconds))
                 self.logger.info(f'Trimming, starting at {intro_seconds} seconds')
@@ -263,7 +269,7 @@ class Encoder:
                 await run_ffmpeg(logger=self.logger, args=cmd, print_every=self.print_every)
             job.enc_end = datetime.utcnow().isoformat()
             td = datetime.fromisoformat(job.enc_end) - datetime.fromisoformat(job.enc_start)
-            status = f"Encoded {job.file_name} in {str(td)}"
+            status = f"Encoded {job.input} in {str(td)}"
             self.logger.info(status)
             embed.add_field(name='Encode Time', value=str(td), inline=False)
             job.raw = False
@@ -275,13 +281,13 @@ class Encoder:
         # Try to delete raw
         if not keep_raw and not job.failure:
             try:
-                await self.delete_raw(job.src, out_fp)
-                embed.set_field_at(0, name='Source Deleted', value=os.path.basename(job.src), inline=True)
+                await self.delete_raw(in_fp, out_fp)
+                embed.set_field_at(0, name='Source Deleted', value=job.input, inline=True)
             except Exception as e:
                 job.failure = str(e)
                 embed.add_field(name='Source Delete Failed', value=str(e), inline=False)
         await self.send_notification(embed=embed)
-        job.deleted = not os.path.exists(job.src)
+        job.deleted = not os.path.exists(in_fp)
         self.write_jobs()
         self.update_cleaner()
 
@@ -296,8 +302,9 @@ class Encoder:
             resp.error = str(e)
             resp.status = web.HTTPBadRequest.status_code
             return resp.web_response
-        if not os.path.exists(job.src): 
-            status = f"Source file not found: {job.src}"
+        in_fp = os.path.join(self.src_path, job.input)
+        if not os.path.exists(in_fp):
+            status = f"Source file not found: {in_fp}"
             embed = self.make_embed_error('Encode failed', e=status)
             await self.send_notification(embed=embed)
             self.logger.error(status)

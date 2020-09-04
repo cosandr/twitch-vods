@@ -2,7 +2,6 @@ import asyncio
 import hashlib
 import logging
 import os
-import re
 import signal
 import uuid
 from datetime import datetime, timedelta
@@ -44,9 +43,10 @@ class Generator:
 
     def __init__(self, loop: asyncio.AbstractEventLoop, **kwargs):
         self.loop = loop
+        self.out_path: str = kwargs.pop('out_path')
         self.pg_uri: str = kwargs.pop('pg_uri')
         self.src_paths: Dict[str, str] = kwargs.pop('src_paths')
-        self.out_path: str = kwargs.pop('out_path')
+        self.time_format: str = kwargs.get('time_format', '%y%m%d-%H%M')
         self.uuid_dict = {}
         # Postgres connection string <user>:<pass>@<host>:<port>/<db>
         self.conn: Optional[asyncpg.Connection] = None
@@ -108,7 +108,7 @@ class Generator:
                     tmp_uuid = uuid.uuid1()
                     tmp_link = os.path.join(self.out_path, tmp_uuid.hex)
                     os.symlink(os.path.join(v, file), tmp_link)
-                    created_dt = get_datetime(name=file, path=v)
+                    created_dt = get_datetime(name=file, time_fmt=self.time_format, path=v)
                     md5 = self.get_md5(os.path.join(v, file))
                     self.uuid_dict[k].append({"filename": file[:-4], "uuid": tmp_uuid, "created": created_dt, "md5": md5})
             self.logger.info("%s links created", k.upper())
@@ -127,7 +127,7 @@ class Generator:
         for k, v in self.src_paths.items():
             for file in os.listdir(v):
                 if file.endswith('.mp4'):
-                    created_dt = get_datetime(name=file, path=v)
+                    created_dt = get_datetime(name=file, time_fmt=self.time_format, path=v)
                     ten_min_ago = datetime.today() - timedelta(minutes=10)
                     if created_dt > ten_min_ago:
                         tmp_uuid = uuid.uuid1().hex

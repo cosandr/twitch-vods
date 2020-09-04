@@ -15,8 +15,9 @@ if platform.system() == 'Windows':
 else:
     _path_prefix = "/tank/"
     if platform.node().lower() != 'dresrv':
-        _path_prefix = f"/mnt/sshfs{_path_prefix}"
+        _path_prefix = f"/dresrv{_path_prefix}"
 
+TIME_FMT = '%y%m%d-%H%M'
 VIDEO_PATH = f"{_path_prefix}{_base_video_path}"
 RAW_VIDEO_PATH = f"{_path_prefix}{_base_raw_path}"
 
@@ -48,7 +49,7 @@ class TestCleanup:
         }
         self.cleaner.pending.clear()
         for n in input_files:
-            self.cleaner.pending[n] = utils.get_datetime(n)
+            self.cleaner.pending[n] = utils.get_datetime(n, TIME_FMT)
         expected_def = [
             {
                 "add_hours": 0,  # Reference time 2020-04-01 00:00
@@ -152,7 +153,7 @@ class TestCleanup:
         }
         self.cleaner.pending.clear()
         for n in input_files:
-            self.cleaner.pending[n] = utils.get_datetime(n)
+            self.cleaner.pending[n] = utils.get_datetime(n, TIME_FMT)
 
         expected_warn = [
             {

@@ -9,7 +9,6 @@ from typing import Dict
 
 from modules import Encoder, Recorder, Generator, Notifier, Cleaner
 
-
 LOOP = asyncio.get_event_loop()
 
 
@@ -35,8 +34,9 @@ def merge_env_args(env_map: dict, args: argparse.Namespace) -> dict:
 
 def run_cleaner(args: argparse.Namespace):
     env_map = {
-        "no_notifications": None,
         "clean_days": None,
+        "no_notifications": None,
+        "time_format": "TIME_FORMAT",
         "warn_at": None,
         "webhook_url": "WEBHOOK_URL",
     }
@@ -53,14 +53,15 @@ def run_encoder(args: argparse.Namespace):
         "copy_pattern": None,
         "copy_pattern_opt": None,
         "dry_run": None,
-        "out_path": "ENC_OUT",
         "enable_cleaner": None,
         "hevc_pattern": None,
         "hevc_pattern_opt": None,
         "listen_address": "ENC_LISTEN_ADDRESS",
         "no_notifications": None,
+        "out_path": "ENC_OUT",
         "print_every": None,
         "src_path": "ENC_SRC",
+        "time_format": "TIME_FORMAT",
         "warn_at": None,
         "webhook_url": "WEBHOOK_URL",
     }
@@ -71,8 +72,9 @@ def run_encoder(args: argparse.Namespace):
 
 def run_generator(args: argparse.Namespace):
     env_map = {
-        "pg_uri": "GEN_PG_URI",
         "out_path": "GEN_DST",
+        "pg_uri": "GEN_PG_URI",
+        "time_format": "TIME_FORMAT",
     }
     kwargs = merge_env_args(env_map, args)
     re_path = re.compile(r'\[(?P<type>\w+)\](?P<path>.+)')
@@ -122,6 +124,7 @@ def run_recorder(args: argparse.Namespace):
         "enc_path": "ENC_PATH",
         "no_notifications": None,
         "out_path": "REC_OUT",
+        "time_format": "TIME_FORMAT",
         "timeout": "REC_TIMEOUT",
         "twitch_id": "REC_TWITCH_ID",
         "user": "REC_USER",
@@ -146,6 +149,7 @@ parser = argparse.ArgumentParser(description='Launcher for twitch recorder stuff
 grp_global = parser.add_argument_group(title='Global options')
 grp_global.add_argument('-n', '--dry_run', action='store_true', default=False, help='Do not change any files')
 grp_global.add_argument('--no_notifications', action='store_true', default=False, help='Disable Discord notifications')
+grp_global.add_argument('--time_format', type=str, default='%y%m%d-%H%M', help='Time format string for videos, must not contain _')
 grp_global.add_argument('--webhook_url', type=str, help='Discord webhook URL')
 
 # Cleaner options
