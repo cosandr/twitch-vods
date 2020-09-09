@@ -71,10 +71,19 @@ class Cleaner:
         self.wait_task: Optional[asyncio.Task] = None
         # Task for worker
         self.worker_task: Optional[asyncio.Task] = None
+        status_str = (
+            f'- PID: {os.getpid()}\n'
+            f'- Clean days: {self.clean_days}\n'
+            f'- Warn at: {self.warn_at[1:]}\n'
+            f'- File time format: {self.time_format}\n'
+        )
         if not self.dry_run:
             self.worker_task = self.loop.create_task(self.worker())
             self.en_del.set()
             self.loop.create_task(self.warning_worker())
+        else:
+            status_str += f'- DRY RUN\n'
+        self.logger.info("\n%s", status_str)
 
     def close(self):
         for task in (self.wait_task, self.worker_task):

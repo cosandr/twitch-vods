@@ -29,9 +29,18 @@ class IntroTrimmer:
         if not log_parent:
             setup_logger(self.logger, 'cropper')
         # --- Logger ---
-        self.logger.info("Video cropper started with PID %d", os.getpid())
+        status_str = (
+            f'- PID: {os.getpid()}\n'
+            f'- Tolerance: {self.tol}\n'
+            f'- Initial gap: {self.initial_gap}\n'
+        )
         # Load config
         self.cfg: List[Config] = Config.from_json(cfg_path)
+        if self.cfg:
+            status_str += "- Cropper patterns:\n"
+            for c in self.cfg:
+                status_str += f'-- {c.re.pattern}\n'
+        self.logger.info("\n%s", status_str)
 
     def get_cfg(self, name: str) -> Optional[Config]:
         for c in self.cfg:

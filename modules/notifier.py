@@ -32,6 +32,10 @@ class Notifier:
         if not self.sess:
             self.loop.run_until_complete(self.async_init())
         self.webhook = Webhook.from_url(webhook_url, adapter=AsyncWebhookAdapter(self.sess))
+        status_str = f'- Webhook: {webhook_url}\n'
+        if self.mention_id:
+            status_str += f'- Mention: {self.mention_id}\n'
+        self.logger.info("\n%s", status_str)
 
     async def async_init(self):
         self.logger.info("aiohttp session initialized")

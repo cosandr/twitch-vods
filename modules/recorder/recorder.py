@@ -45,6 +45,18 @@ class Recorder:
         self.logger.setLevel(logging.DEBUG)
         kwargs['log_parent'] = self.logger.name
         # --- Logger ---
+        status_str = (
+            f'- Encoder: {self.enc_path}\n'
+            f'- File time format: {self.time_format}\n'
+            f'- Output: {self.out_path}\n'
+            f'- PID: {os.getpid()}\n'
+            f'- Timeout: {self.timeout}\n'
+            f'- Twitch client ID: {self.twitch_id}\n'
+            f'- User: {user_login}\n'
+        )
+        if self.dry_run:
+            status_str += f'- DRY RUN\n'
+        self.logger.info("\n%s", status_str)
         self.loop.run_until_complete(self.async_init(user_login))
 
         if enable_notifications:
@@ -63,14 +75,11 @@ class Recorder:
             if not self.dry_run:
                 os.mkdir(self.out_path, 0o750)
                 self.logger.info('%s created', self.out_path)
-        self.logger.info('Saving raw files to %s', self.out_path)
-        self.logger.info('Checking %s every %d seconds', self.user.display_name, self.timeout)
 
         embed = self.make_embed()
         embed.colour = Colour.light_grey()
         embed.description = 'Started'
         self.loop.create_task(self.send_notification(embed=embed))
-        self.logger.info("Twitch recorder started with PID %d", os.getpid())
         self.check_en.set()
 
     async def async_init(self, user_login):
@@ -274,10 +283,12 @@ class Recorder:
     async def post_record(self, raw_name: str):
         # Send job to encoder
         job = Job(input=raw_name, title=self.stream.title, user=self.user.display_name, created_at=self.stream.created_at)
+        job_str = job.to_json(indent=2)
+        self.logger.debug("Sending job to encoder\n%s", job_str)
         try:
             await self.http_post_data(url='/job/run', data=job.to_json(), params=dict(immediate='true'))
         except Exception as e:
-            self.logger.error(f'{e}\n{job.to_json(indent=2)}')
+            self.logger.exception('Failed to send job to encoder')
             embed = self.make_embed_error('Failed to send job to encoder', e=e)
             await self.send_notification(embed=embed)
         self.loop.create_task(self.timer())

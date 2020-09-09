@@ -42,7 +42,7 @@ ICON_URL = 'https://raw.githubusercontent.com/cosandr/twitch-vods/master/icons/e
 
 # noinspection PyBroadException
 class Encoder:
-    jobs_file = 'data/jobs.json'
+    jobs_file = './data/jobs.json'
     copy_args = [
         '-c:v', 'copy', '-f', 'mp4',
         '-c:a', 'aac',
@@ -79,12 +79,28 @@ class Encoder:
         setup_logger(self.logger, logger_name.lower())
         kwargs['log_parent'] = logger_name
         # --- Logger ---
+        status_str = (
+            f'- PID: {os.getpid()}\n'
+            f'- Source: {self.src_path}\n'
+            f'- Output: {self.out_path}\n'
+            f'- File time format: {self.time_format}\n'
+            f'- Jobs file: {self.jobs_file}\n'
+        )
+        if self.dry_run:
+            status_str += f'- DRY RUN\n'
         # Removes illegal NTFS characters, extra spaces and trailing whitespace
         self.re_ntfs = re.compile(r'(\s{2,}|\s+$|[<>:\"/\\|?*\n]+)')
         if self.hevc_pattern:
             self.re_hevc = re.compile(self.hevc_pattern, *self.hevc_pattern_opt)
+            status_str += f'- HEVC pattern: {self.re_hevc.pattern}\n'
+        else:
+            self.re_hevc = None
         if self.copy_pattern:
             self.re_copy = re.compile(self.copy_pattern, *self.copy_pattern_opt)
+            status_str += f'- Copy pattern: {self.re_copy.pattern}\n'
+        else:
+            self.re_copy = None
+        self.logger.info('\n%s', status_str)
         self.jobs: List[Job] = []
         self.trimmer = IntroTrimmer(cfg_path=trim_cfg_path, **kwargs)
         signal.signal(signal.SIGTERM, self.signal_handler)
@@ -95,8 +111,6 @@ class Encoder:
                 if not self.dry_run:
                     os.mkdir(path, 0o750)
                     self.logger.info('%s created', path)
-        self.logger.info('Source files from %s', self.src_path)
-        self.logger.info('Saving encoded files to %s', self.out_path)
 
         if enable_notifications:
             if not self.notifier:
@@ -120,7 +134,6 @@ class Encoder:
         embed.colour = Colour.light_grey()
         embed.description = 'Started'
         self.loop.create_task(self.send_notification(embed=embed))
-        self.logger.info("Encoder started with PID %d", os.getpid())
 
     async def close(self, _app=None):
         """Cleanup"""
@@ -214,9 +227,10 @@ class Encoder:
             os.mkdir(out_path, 0o750)
         if not job.created_at:
             job.created_at = get_datetime(job.input, self.time_format, self.src_path)
-        file_name = f'{job.created_at}_{self.re_ntfs.sub(job.title, "")}'
-        will_hevc = self.re_hevc.search(file_name)
-        will_copy = self.re_copy.search(file_name)
+        file_name = f'{job.created_at.strftime(self.time_format)}_{self.re_ntfs.sub("", job.title)}'
+        will_hevc = self.re_hevc.search(file_name) if self.re_hevc else False
+        will_copy = self.re_copy.search(file_name) if self.re_copy else False
+        self.logger.debug("File: %s, HEVC? %s, Copy? %s", file_name, str(will_hevc), str(will_copy))
         if will_hevc:
             cmd = self.hevc_args.copy()
             job.out_file = file_name + '.mkv'
@@ -276,15 +290,15 @@ class Encoder:
         except Exception as e:
             embed.add_field(name='Encode Failed', value=str(e), inline=False)
             self.logger.exception('Encoding failed')
-            job.failure = str(e)
+            job.error = str(e)
             job.ignore = True
         # Try to delete raw
-        if not keep_raw and not job.failure:
+        if not keep_raw and not job.error:
             try:
                 await self.delete_raw(in_fp, out_fp)
                 embed.set_field_at(0, name='Source Deleted', value=job.input, inline=True)
             except Exception as e:
-                job.failure = str(e)
+                job.error = str(e)
                 embed.add_field(name='Source Delete Failed', value=str(e), inline=False)
         await self.send_notification(embed=embed)
         job.deleted = not os.path.exists(in_fp)
@@ -297,11 +311,13 @@ class Encoder:
         resp = Response()
         job_json: dict = await r.json()
         try:
-            job = Job.from_dict(job_json)
+            self.jobs.append(Job.from_dict(job_json))
+            job = self.jobs[-1]
         except Exception as e:
             resp.error = str(e)
             resp.status = web.HTTPBadRequest.status_code
             return resp.web_response
+        self.logger.debug('Got job from %s\n%s', r.remote, job.to_json(indent=2))
         in_fp = os.path.join(self.src_path, job.input)
         if not os.path.exists(in_fp):
             status = f"Source file not found: {in_fp}"
@@ -309,7 +325,6 @@ class Encoder:
             await self.send_notification(embed=embed)
             self.logger.error(status)
             job.ignore = True
-            self.jobs.append(job)
             self.write_jobs()
             resp.error = status
             resp.status = web.HTTPBadRequest.status_code
