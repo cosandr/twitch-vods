@@ -118,9 +118,8 @@ class Encoder:
                     self.notifier = Notifier(loop=self.loop, **kwargs)
                 except Exception:
                     self.logger.exception('Cannot initialize Notifier')
-            else:
-                self.notifier = None
-                self.logger.info('No notifications')
+        else:
+            self.logger.info('No notifications')
 
         if enable_cleaner:
             kwargs['check_path'] = self.src_path

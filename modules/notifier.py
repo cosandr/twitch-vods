@@ -38,14 +38,14 @@ class Notifier:
         self.logger.info("\n%s", status_str)
 
     async def async_init(self):
-        self.logger.info("aiohttp session initialized")
+        self.logger.debug("aiohttp session initialized")
         self.sess = ClientSession()
         self._created_sess = True
 
     async def close(self):
         if self._created_sess:
             await self.sess.close()
-            self.logger.info("aiohttp session closed")
+            self.logger.debug("aiohttp session closed")
 
     async def send(self, content: str = '', title: str = '', embed: Embed = None, name: str = 'Notifier', time: datetime = None):
         if not any((content, title, embed)):

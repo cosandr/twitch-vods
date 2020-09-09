@@ -61,13 +61,13 @@ class Recorder:
 
         if enable_notifications:
             if not self.notifier:
+                kwargs['sess'] = self.aio_sess
                 try:
                     self.notifier = Notifier(loop=self.loop, **kwargs)
                 except Exception:
                     self.logger.exception('Cannot initialize Notifier')
-            else:
-                self.notifier = None
-                self.logger.info('No notifications')
+        else:
+            self.logger.info('No notifications')
 
         # Check args
         if not os.path.exists(self.out_path):
@@ -100,7 +100,7 @@ class Recorder:
         embed.description = 'Closing'
         await self.send_notification(embed=embed)
         await self.aio_sess.close()
-        self.logger.info("aiohttp session closed")
+        self.logger.debug("aiohttp session closed")
 
     def signal_handler(self, _signal_num, _frame):
         self.loop.run_until_complete(self.close())

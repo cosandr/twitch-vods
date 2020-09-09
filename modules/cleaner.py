@@ -55,9 +55,8 @@ class Cleaner:
                     self.notifier = Notifier(loop=self.loop, **kwargs)
                 except Exception:
                     self.logger.exception('Cannot initialize Notifier')
-            else:
-                self.notifier = None
-                self.logger.info('No notifications')
+        else:
+            self.logger.info('No notifications')
 
         self.pending: Dict[str, datetime] = {}
         # Track for which files we sent warnings for and when
