@@ -39,7 +39,7 @@ class Recorder:
         self.stream: Optional[StreamData] = None
         self.unix_sess: Optional[ClientSession] = None
         self.user: Optional[UserData] = None
-        signal.signal(signal.SIGTERM, self.signal_handler)
+        self.loop.add_signal_handler(signal.SIGTERM, self.signal_handler)
         # --- Logger ---
         self.logger = logging.getLogger(f'{LOGGER.name}.{user_login}')
         self.logger.setLevel(logging.DEBUG)
@@ -102,7 +102,7 @@ class Recorder:
         await self.aio_sess.close()
         self.logger.debug("aiohttp session closed")
 
-    def signal_handler(self, _signal_num, _frame):
+    def signal_handler(self):
         self.loop.run_until_complete(self.close())
         exit(0)
 

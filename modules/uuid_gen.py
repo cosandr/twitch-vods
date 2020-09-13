@@ -55,11 +55,11 @@ class Generator:
         self.logger.setLevel(logging.DEBUG)
         setup_logger(self.logger, 'uuid')
         # --- Logger ---
-        signal.signal(signal.SIGTERM, self.signal_handler)
+        self.loop.add_signal_handler(signal.SIGTERM, self.signal_handler)
         self.loop.run_until_complete(self.async_init())
         self.logger.info("Generator started with PID %d", os.getpid())
 
-    def signal_handler(self, _signal_num, _frame):
+    def signal_handler(self):
         self.loop.run_until_complete(self.close())
         exit(0)
 

@@ -103,7 +103,7 @@ class Encoder:
         self.logger.info('\n%s', status_str)
         self.jobs: List[Job] = []
         self.trimmer = IntroTrimmer(cfg_path=trim_cfg_path, **kwargs)
-        signal.signal(signal.SIGTERM, self.signal_handler)
+        self.loop.add_signal_handler(signal.SIGTERM, self.signal_handler)
         # Check source and destination directories
         for path in (self.src_path, self.out_path):
             if not os.path.exists(path):
@@ -191,7 +191,7 @@ class Encoder:
             return
         self.cleaner.en_del.set()
 
-    def signal_handler(self, _signal_num, _frame):
+    def signal_handler(self):
         self.loop.run_until_complete(self.close())
         exit(0)
 
