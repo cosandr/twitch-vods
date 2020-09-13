@@ -72,22 +72,25 @@ class IntroTrimmer:
             return False
         return True
 
-    def find_intro(self, file: str, test: int = 0) -> Optional[int]:
+    def find_intro(self, file: str, check_name='', _test=0) -> Optional[int]:
         """
         Returns time in seconds where the intro starts
         Returns None if we don't have a definition for the file
         """
-        cfg: Optional[Config] = self.get_cfg(file)
-        if not cfg and not test:
+        if check_name:
+            cfg: Optional[Config] = self.get_cfg(check_name)
+        else:
+            cfg: Optional[Config] = self.get_cfg(file)
+        if not cfg and not _test:
             return None
         curr_t = 0
         gap = self.initial_gap
         # Assume start is intro
         prev_is_intro = True
-        if test:
+        if _test:
             def _is_start_wait(_f, t, _cfg):
                 """Return True when t is smaller than test seconds"""
-                return t < test
+                return t < _test
             is_start_wait = _is_start_wait
         else:
             is_start_wait = self.is_start_wait

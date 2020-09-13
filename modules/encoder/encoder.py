@@ -263,7 +263,7 @@ class Encoder:
         # Trim intro if we can
         if self.trimmer.get_cfg(job.title):
             try:
-                intro_seconds = self.trimmer.find_intro(file_name)
+                intro_seconds = self.trimmer.find_intro(in_fp, check_name=job.title)
                 cmd.insert(0, '-ss')
                 cmd.insert(1, str(intro_seconds))
                 self.logger.info(f'Trimming, starting at {intro_seconds} seconds')
@@ -355,7 +355,7 @@ class Encoder:
             self.logger.warning('Cannot parse duration: %s', proc_fp)
             raise Exception('Cannot parse processed duration')
         dur_diff = raw_dur - proc_dur
-        if dur_diff.total_seconds() > 2:
+        if dur_diff.total_seconds() > 5:
             self.logger.warning('%s [%s] -> SHORTER %s [%s]', raw_dur, raw_size_str, proc_dur, proc_size_str)
             raise Exception(f'{proc_fp} is too short: {proc_dur}')
         try:

@@ -117,7 +117,7 @@ class TestCrop(unittest.TestCase):
         # Intro, but within tolerance
         expected = [20, 40, 60, 67, 123, 333, 444, 777, 722, 944, 1277]
         for val in expected:
-            actual = self.cropper.find_intro('', test=val)
+            actual = self.cropper.find_intro('', _test=val)
             self.assertEqual(abs(val - actual) <= self.cropper.tol, True, f'Expected: {val}s, got {actual}s, diff {abs(actual-val)}s')
 
     @unittest.skip('Run to setup data when needed')
