@@ -117,18 +117,50 @@ class IntroTrimmer:
         self.logger.info('Found intro at %d in %.2fms [%d iterations]', curr_t, (time.perf_counter()-start)*1000, num_iter)
         return curr_t
 
+    def extract_frame_msec(self, video_file: str, seconds: int = 0) -> np.ndarray:
+        if not os.path.exists(video_file):
+            raise FileNotFoundError(f'{video_file} not found')
+        start = time.perf_counter()
+        cap = cv2.VideoCapture(video_file)
+        msec_target = seconds * 1000
+        # Seek to end
+        ok = cap.set(cv2.CAP_PROP_POS_AVI_RATIO, 1)
+        if not ok:
+            raise Exception(f'CV2 [{video_file}] cannot set position to end of file')
+        ok, _ = cap.read()
+        if not ok:
+            raise Exception(f'CV2 [{video_file}] cannot read frame at end of file')
+        msec_total = cap.get(cv2.CAP_PROP_POS_MSEC)
+        if not msec_total:
+            raise Exception(f'CV2 [{video_file}] cannot get milliseconds at end of file')
+        if msec_target > msec_total:
+            raise RuntimeError(f'Cannot seek to {msec_target:,.1f}ms/{msec_total:,.1f}ms in {video_file}')
+        ok = cap.set(cv2.CAP_PROP_POS_MSEC, msec_target)
+        if not ok:
+            raise Exception(f'CV2 cannot set position to {msec_target:,.1f}ms/{msec_total:,.1f}ms in {video_file}')
+        ok, img = cap.read()
+        if not ok:
+            raise Exception(f'CV2 cannot read frame at {msec_target:,.1f}ms in {video_file}')
+        greyscale = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        self.logger.debug('CV2 read frame at %,.1f/%,.1f in %.2fms', msec_target, msec_total, (time.perf_counter()-start)*1000)
+        greyscale = cv2.resize(greyscale, (640, 360), interpolation=cv2.INTER_LINEAR)
+        cap.release()
+        return greyscale
+
     def extract_frame(self, video_file: str, frame: int = 0, seconds: int = 0) -> np.ndarray:
         if not os.path.exists(video_file):
             raise FileNotFoundError(f'{video_file} not found')
         start = time.perf_counter()
         cap = cv2.VideoCapture(video_file)
-        total_frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         if seconds:
             frame = int(seconds * cap.get(cv2.CAP_PROP_FPS))
         if frame > total_frames or frame < 0:
             raise Exception(f'Frames must be between 0 and {total_frames}, got {frame}')
         cap.set(cv2.CAP_PROP_POS_FRAMES, frame)
-        res, img = cap.read()
+        ok, img = cap.read()
+        if not ok:
+            raise Exception(f'CV2 cannot read frame {frame:,d}/{total_frames:,d} from {video_file}')
         greyscale = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         self.logger.debug('CV2 read frame %d/%d in %.2fms', frame, total_frames, (time.perf_counter()-start)*1000)
         greyscale = cv2.resize(greyscale, (640, 360), interpolation=cv2.INTER_LINEAR)

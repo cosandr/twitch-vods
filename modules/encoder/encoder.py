@@ -1,4 +1,5 @@
 import asyncio
+import functools
 import json
 import logging
 import os
@@ -227,8 +228,8 @@ class Encoder:
         if not job.created_at:
             job.created_at = get_datetime(job.input, self.time_format, self.src_path)
         file_name = f'{job.created_at.strftime(self.time_format)}_{self.re_ntfs.sub("", job.title)}'
-        will_hevc = self.re_hevc.search(file_name) if self.re_hevc else False
-        will_copy = self.re_copy.search(file_name) if self.re_copy else False
+        will_hevc = bool(self.re_hevc.search(file_name)) if self.re_hevc else False
+        will_copy = bool(self.re_copy.search(file_name)) if self.re_copy else False
         self.logger.debug("File: %s, HEVC? %s, Copy? %s", file_name, str(will_hevc), str(will_copy))
         if will_hevc:
             cmd = self.hevc_args.copy()
@@ -263,7 +264,10 @@ class Encoder:
         # Trim intro if we can
         if self.trimmer.get_cfg(job.title):
             try:
-                intro_seconds = self.trimmer.find_intro(in_fp, check_name=job.title)
+                intro_seconds = await self.loop.run_in_executor(
+                    None,
+                    functools.partial(self.trimmer.find_intro, in_fp, check_name=job.title)
+                )
                 cmd.insert(0, '-ss')
                 cmd.insert(1, str(intro_seconds))
                 self.logger.info(f'Trimming, starting at {intro_seconds} seconds')
