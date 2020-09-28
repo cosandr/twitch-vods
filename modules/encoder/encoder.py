@@ -1,5 +1,4 @@
 import asyncio
-import functools
 import json
 import logging
 import os
@@ -220,11 +219,7 @@ class Encoder:
         return resp.web_response
 
     async def run_job(self, job: Job):
-        keep_raw = False
         # Create folder from username if needed
-        out_path = os.path.join(self.out_path, job.user)
-        if not os.path.exists(out_path):
-            os.mkdir(out_path, 0o750)
         if not job.created_at:
             job.created_at = get_datetime(job.input, self.time_format, self.src_path)
         file_name = f'{job.created_at.strftime(self.time_format)}_{self.re_ntfs.sub("", job.title)}'
@@ -250,34 +245,17 @@ class Encoder:
             self.update_cleaner()
             return
         in_fp = os.path.join(self.src_path, job.input)
-        out_fp = os.path.join(out_path, job.out_file)
+        tmp_out_fp = os.path.join(self.src_path, f'enc_{job.input}')
         # Insert input
         cmd.insert(0, '-i')
         cmd.insert(1, in_fp)
         # Append output file
-        cmd.append(out_fp)
+        cmd.append(tmp_out_fp)
         self.logger.info(f"Encoding {job.input} -> {job.out_file}")
         embed = self.make_embed()
         embed.title = 'Encode'
         embed.add_field(name='Source', value=job.input, inline=True)
         embed.add_field(name='Target', value=job.out_file, inline=True)
-        # Trim intro if we can
-        if self.trimmer.get_cfg(job.title):
-            try:
-                intro_seconds = await self.loop.run_in_executor(
-                    None,
-                    functools.partial(self.trimmer.find_intro, in_fp, check_name=job.title)
-                )
-                cmd.insert(0, '-ss')
-                cmd.insert(1, str(intro_seconds))
-                self.logger.info(f'Trimming, starting at {intro_seconds} seconds')
-                embed.add_field(name='Trimmed', value=f'{intro_seconds} seconds', inline=False)
-                keep_raw = True
-                job.trimmed = intro_seconds
-            except Exception as e:
-                self.logger.exception('Could not find intro seconds')
-                embed.add_field(name='Trim Failed', value=str(e), inline=False)
-        await self.send_notification(embed=embed)
         # Try to encode
         try:
             job.enc_cmd = ' '.join(cmd)
@@ -295,14 +273,37 @@ class Encoder:
             self.logger.exception('Encoding failed')
             job.error = str(e)
             job.ignore = True
-        # Try to delete raw
-        if not keep_raw and not job.error:
+        # Trim intro if we can
+        if not job.error and self.trimmer.get_cfg(job.title):
             try:
-                await self.delete_raw(in_fp, out_fp)
+                trim_fp = os.path.join(self.src_path, f'trimmed_{job.input}')
+                intro_seconds = await self.trimmer.run_crop(file=tmp_out_fp, out_file=trim_fp, check_name=job.title)
+                embed.add_field(name='Trimmed', value=f'{intro_seconds} seconds', inline=False)
+                job.start_seconds = intro_seconds
+                # Replace encoded file with trimmed one
+                os.replace(trim_fp, tmp_out_fp)
+            except Exception as e:
+                self.logger.exception('Could not find intro seconds')
+                embed.add_field(name='Trim Failed', value=str(e), inline=False)
+        # Try to delete raw
+        if not job.error and not job.start_seconds:
+            try:
+                await self.delete_raw(in_fp, tmp_out_fp)
                 embed.set_field_at(0, name='Source Deleted', value=job.input, inline=True)
             except Exception as e:
                 job.error = str(e)
                 embed.add_field(name='Source Delete Failed', value=str(e), inline=False)
+        # Move encoded file to final directory
+        if os.path.exists(tmp_out_fp):
+            try:
+                out_path = os.path.join(self.out_path, job.user)
+                if not os.path.exists(out_path):
+                    os.mkdir(out_path, 0o750)
+                out_fp = os.path.join(out_path, job.out_file)
+                os.replace(tmp_out_fp, out_fp)
+            except Exception as e:
+                job.error = str(e)
+                embed.add_field(name='Move Failed', value=str(e), inline=False)
         await self.send_notification(embed=embed)
         job.deleted = not os.path.exists(in_fp)
         self.write_jobs()
