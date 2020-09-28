@@ -63,8 +63,43 @@ class TestCrop(unittest.TestCase):
         for file, dct in expected_def.items():
             for expected, values in dct.items():
                 for val in values:
-                    actual = self.cropper.is_start_wait(VIDEO_PATH + file, val, CONFIG)
+                    actual = self.cropper.is_start_wait(VIDEO_PATH + file, val, CONFIG, use_ms=False)
                     self.assertEqual(expected, actual, f'{file} [{val}]')
+
+    def test_is_start_wait_ms(self):
+        expected_def = {
+            '200122-2318_Return Of By The Numbers #102.mp4': {True: np.linspace(0, 1200, num=5, dtype=np.uint16),
+                                                              False: np.linspace(1280, 3000, num=5, dtype=np.uint16)},
+            '200124-2323_Return Of By The Numbers #104.mp4': {True: np.linspace(0, 720, num=5, dtype=np.uint16),
+                                                              False: np.linspace(730, 3000, num=5, dtype=np.uint16)},
+            '200128-2320_Return Of By The Numbers #105.mp4': {True: np.linspace(0, 940, num=5, dtype=np.uint16),
+                                                              False: np.linspace(950, 3000, num=5, dtype=np.uint16)},
+        }
+        for file, dct in expected_def.items():
+            for expected, values in dct.items():
+                for val in values:
+                    actual = self.cropper.is_start_wait(VIDEO_PATH + file, val, CONFIG, use_ms=True)
+                    self.assertEqual(expected, actual, f'{file} [{val}]')
+
+    def test_extract_frame(self):
+        files = [
+            "191205-0211_Starladder's Ministry Of Truth.mkv",
+            "200822-1943_I Hate It Here #17.mp4",
+        ]
+        for file in files:
+            frame = self.cropper.extract_frame(os.path.join(VIDEO_PATH, file), seconds=10)
+            empty = np.zeros(shape=frame.shape, dtype=frame.dtype)
+            self.assertFalse(np.equal(empty, frame).all(), f'{file} frame empty')
+
+    def test_extract_frame_ms(self):
+        files = [
+            "191205-0211_Starladder's Ministry Of Truth.mkv",
+            "200822-1943_I Hate It Here #17.mp4",
+        ]
+        for file in files:
+            frame = self.cropper.extract_frame_ms(os.path.join(VIDEO_PATH, file), seconds=10)
+            empty = np.zeros(shape=frame.shape, dtype=frame.dtype)
+            self.assertFalse(np.equal(empty, frame).all(), f'{file} frame empty')
 
     def test_compare(self):
         for f in os.listdir(FRAME_PATH):
