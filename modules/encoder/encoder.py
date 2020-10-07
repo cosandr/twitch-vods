@@ -223,17 +223,17 @@ class Encoder:
         # Create folder from username if needed
         if not job.created_at:
             job.created_at = get_datetime(job.input, self.time_format, self.src_path)
-        file_name = f'{job.created_at.strftime(self.time_format)}_{self.re_ntfs.sub("", job.title)}'
-        will_hevc = bool(self.re_hevc.search(file_name)) if self.re_hevc else False
-        will_copy = bool(self.re_copy.search(file_name)) if self.re_copy else False
-        self.logger.debug("File: %s, HEVC? %s, Copy? %s", file_name, str(will_hevc), str(will_copy))
+        out_name = f'{job.created_at.strftime(self.time_format)}_{self.re_ntfs.sub("", job.title)}'
+        will_hevc = bool(self.re_hevc.search(out_name)) if self.re_hevc else False
+        will_copy = bool(self.re_copy.search(out_name)) if self.re_copy else False
+        self.logger.debug("File: %s, HEVC? %s, Copy? %s", out_name, str(will_hevc), str(will_copy))
         if will_hevc:
             cmd = self.hevc_args.copy()
-            job.out_file = file_name + '.mkv'
+            out_ext = '.mkv'
             job.enc_codec = 'hevc'
         elif will_copy:
             cmd = self.copy_args.copy()
-            job.out_file = file_name + '.mp4'
+            out_ext = '.mp4'
             job.enc_codec = 'copy'
         else:
             embed = self.make_embed()
@@ -245,8 +245,10 @@ class Encoder:
             self.write_jobs()
             self.update_cleaner()
             return
+        job.out_file = out_name + out_ext
         in_fp = os.path.join(self.src_path, job.input)
-        tmp_out_fp = os.path.join(self.src_path, f'enc_{job.input}')
+        input_new_ext = os.path.splitext(job.input)[0] + out_ext
+        tmp_out_fp = os.path.join(self.src_path, f'enc_{input_new_ext}')
         # Insert input
         cmd.insert(0, '-i')
         cmd.insert(1, in_fp)
@@ -277,7 +279,7 @@ class Encoder:
         # Trim intro if we can
         if not job.error and self.trimmer.get_cfg(job.title):
             try:
-                trim_fp = os.path.join(self.src_path, f'trimmed_{job.input}')
+                trim_fp = os.path.join(self.src_path, f'trimmed_{input_new_ext}')
                 intro_seconds = await self.trimmer.run_crop(file=tmp_out_fp, out_file=trim_fp, check_name=job.title)
                 embed.add_field(name='Trimmed', value=f'{intro_seconds} seconds', inline=False)
                 job.start_seconds = intro_seconds
