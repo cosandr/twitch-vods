@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import signal
 import time
 from datetime import datetime
@@ -281,7 +282,7 @@ class Encoder:
                 embed.add_field(name='Trimmed', value=f'{intro_seconds} seconds', inline=False)
                 job.start_seconds = intro_seconds
                 # Replace encoded file with trimmed one
-                os.replace(trim_fp, tmp_out_fp)
+                shutil.move(trim_fp, tmp_out_fp)
             except Exception as e:
                 self.logger.exception('Could not find intro seconds')
                 embed.add_field(name='Trim Failed', value=str(e), inline=False)
@@ -300,7 +301,7 @@ class Encoder:
                 if not os.path.exists(out_path):
                     os.mkdir(out_path, 0o750)
                 out_fp = os.path.join(out_path, job.out_file)
-                os.replace(tmp_out_fp, out_fp)
+                shutil.move(tmp_out_fp, out_fp)
             except Exception as e:
                 job.error = str(e)
                 embed.add_field(name='Move Failed', value=str(e), inline=False)
