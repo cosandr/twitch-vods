@@ -1,5 +1,5 @@
 streamlink
-aiohttp
+aiohttp < 3.7.0
 asyncpg
 numpy
 scikit-image
