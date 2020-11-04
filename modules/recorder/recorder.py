@@ -267,11 +267,17 @@ class Recorder:
         rec_name = f"{self.stream.created_at_str}_{self.user.name}_{no_space_title}"
         raw_name = f'{rec_name}.flv'
         raw_fp = os.path.join(self.out_path, raw_name)
+        if os.path.exists(raw_fp):
+            self.logger.info('Raw file %s already exists', raw_fp)
+            # Number it
+            existing_num = len([f for f in os.listdir(self.out_path) if f.startswith(rec_name)])
+            raw_name = f'{rec_name}.{existing_num}.flv'
+            raw_fp = os.path.join(self.out_path, raw_name)
         self.logger.info('Saving raw stream to %s', raw_fp)
         if self.dry_run:
             self.logger.info('Dry run, do not run streamlink')
             return
-        cmd = f"streamlink {self.stream.url} --default-stream best -o {raw_fp} -l info"
+        cmd = f"streamlink {self.stream.url} --default-stream best -o {raw_fp} -l info --force"
         try:
             await self.run(cmd)
         except Exception as e:
