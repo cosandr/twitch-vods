@@ -42,9 +42,12 @@ def run_cleaner(args: argparse.Namespace):
     }
     kwargs = merge_env_args(env_map, args)
     inst = Cleaner(LOOP, check_path=args.path, **kwargs)
-    inst.worker_task = LOOP.create_task(inst.worker())
-    inst.en_del.set()
-    LOOP.run_until_complete(inst.worker_task)
+
+    async def _run():
+        await inst.init_task
+        await inst.worker_task
+
+    LOOP.run_until_complete(_run())
 
 
 def run_encoder(args: argparse.Namespace):
@@ -97,14 +100,19 @@ def run_generator(args: argparse.Namespace):
     elif not kwargs.get('out_path'):
         raise RuntimeError('Output path required')
     inst = Generator(LOOP, **kwargs)
-    LOOP.run_until_complete(inst.replace_all())
-    try:
-        LOOP.run_until_complete(inst.check_new_files())
-    except KeyboardInterrupt:
-        inst.logger.info("Keyboard interrupt, exit.")
-    except Exception as error:
-        traceback.print_exception(type(error), error, error.__traceback__)
-    LOOP.run_until_complete(inst.close())
+
+    async def _run():
+        await inst.init_task
+        await inst.replace_all()
+        try:
+            await inst.check_new_files()
+        except KeyboardInterrupt:
+            inst.logger.info("Keyboard interrupt, exit.")
+        except Exception as error:
+            traceback.print_exception(type(error), error, error.__traceback__)
+        await inst.close()
+
+    LOOP.run_until_complete(_run())
 
 
 def run_notifier(args: argparse.Namespace):
@@ -115,7 +123,12 @@ def run_notifier(args: argparse.Namespace):
     kwargs = merge_env_args(env_map, args)
     content = ' '.join(args.content)
     inst = Notifier(LOOP, **kwargs)
-    LOOP.run_until_complete(inst.send(content=content))
+
+    async def _run():
+        await inst.init_task
+        await inst.send(content=content)
+
+    LOOP.run_until_complete(_run())
 
 
 def run_recorder(args: argparse.Namespace):
@@ -132,16 +145,21 @@ def run_recorder(args: argparse.Namespace):
     }
     kwargs = merge_env_args(env_map, args)
     inst = Recorder(loop=LOOP, **kwargs)
-    while True:
-        try:
-            LOOP.run_until_complete(inst.check_if_live())
-        except KeyboardInterrupt:
-            inst.logger.info("Keyboard interrupt, exit.")
-            break
-        except Exception as error:
-            traceback.print_exception(type(error), error, error.__traceback__)
-            pass
-    LOOP.run_until_complete(inst.close())
+
+    async def _run():
+        await inst.init_task
+        while True:
+            try:
+                await inst.check_if_live()
+            except KeyboardInterrupt:
+                inst.logger.info("Keyboard interrupt, exit.")
+                break
+            except Exception as error:
+                traceback.print_exception(type(error), error, error.__traceback__)
+                pass
+        await inst.close()
+
+    LOOP.run_until_complete(_run())
 
 
 parser = argparse.ArgumentParser(description='Launcher for twitch recorder stuff')

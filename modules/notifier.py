@@ -17,6 +17,7 @@ class Notifier:
     def __init__(self, loop: asyncio.AbstractEventLoop, webhook_url: str, **kwargs):
         self.loop = loop
         self.sess: ClientSession = kwargs.get('sess', None)
+        self.webhook = None
         log_parent: str = kwargs.get('log_parent', '')
         self.mention_id: str = kwargs.pop('mention_id', '')
         self._created_sess = False
@@ -29,18 +30,18 @@ class Notifier:
         if not log_parent:
             setup_logger(self.logger, 'notifier')
         # --- Logger ---
+        self.init_task = self.loop.create_task(self.async_init(webhook_url))
+
+    async def async_init(self, webhook_url):
         if not self.sess:
-            self.loop.run_until_complete(self.async_init())
+            self.sess = ClientSession()
+            self._created_sess = True
+            self.logger.debug("aiohttp session initialized")
         self.webhook = Webhook.from_url(webhook_url, adapter=AsyncWebhookAdapter(self.sess))
         status_str = f'- Webhook: {webhook_url}\n'
         if self.mention_id:
             status_str += f'- Mention: {self.mention_id}\n'
         self.logger.info("\n%s", status_str)
-
-    async def async_init(self):
-        self.logger.debug("aiohttp session initialized")
-        self.sess = ClientSession()
-        self._created_sess = True
 
     async def close(self):
         if self._created_sess:

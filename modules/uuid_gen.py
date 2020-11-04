@@ -56,12 +56,13 @@ class Generator:
         setup_logger(self.logger, 'uuid')
         # --- Logger ---
         self.loop.add_signal_handler(signal.SIGTERM, self.signal_handler)
-        self.loop.run_until_complete(self.async_init())
-        self.logger.info("Generator started with PID %d", os.getpid())
+        self.init_task = self.loop.create_task(self.async_init())
 
     def signal_handler(self):
-        self.loop.run_until_complete(self.close())
-        exit(0)
+        async def _run():
+            await self.close()
+            exit(0)
+        self.loop.create_task(_run())
 
     async def async_init(self):
         self.conn = await asyncpg.connect(dsn=f'postgres://{self.pg_uri}')
@@ -72,9 +73,10 @@ class Generator:
             self.logger.info('PSQL table %s created', self.psql_table_name)
         else:
             self.logger.info('PSQL table %s OK', self.psql_table_name)
+        self.logger.info("Generator started with PID %d", os.getpid())
 
     async def close(self):
-        await self.conn.close(timeout=30)
+        await self.conn.close(timeout=5)
         self.logger.info('PSQL connection closed')
 
     async def check_new_files(self, wait_time: int = 60):

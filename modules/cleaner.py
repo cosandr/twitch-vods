@@ -49,15 +49,6 @@ class Cleaner:
         if not log_parent:
             setup_logger(self.logger, 'cleaner')
 
-        if enable_notifications:
-            if not self.notifier:
-                try:
-                    self.notifier = Notifier(loop=self.loop, **kwargs)
-                except Exception:
-                    self.logger.exception('Cannot initialize Notifier')
-        else:
-            self.logger.info('No notifications')
-
         self.pending: Dict[str, datetime] = {}
         # Track for which files we sent warnings for and when
         self.warned: Dict[str, int] = {}
@@ -83,6 +74,18 @@ class Cleaner:
         else:
             status_str += f'- DRY RUN\n'
         self.logger.info("\n%s", status_str)
+        self.init_task = self.loop.create_task(self.async_init(**kwargs))
+
+    async def async_init(self, **kwargs):
+        if kwargs.get('no_notifications', False):
+            self.logger.info('No notifications')
+        else:
+            if not self.notifier:
+                try:
+                    self.notifier = Notifier(loop=self.loop, **kwargs)
+                    await self.notifier.init_task
+                except Exception:
+                    self.logger.exception('Cannot initialize Notifier')
 
     def close(self):
         for task in (self.wait_task, self.worker_task):

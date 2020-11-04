@@ -58,8 +58,6 @@ class Encoder:
 
     def __init__(self, loop: asyncio.AbstractEventLoop, **kwargs):
         self.loop = loop
-        enable_cleaner: bool = kwargs.pop('enable_cleaner', False)
-        enable_notifications: bool = not kwargs.get('no_notifications', False)
         self.cleaner: Optional[Cleaner] = kwargs.pop('cleaner', None)
         self.copy_pattern: str = kwargs.pop('copy_pattern', '.*')
         self.copy_pattern_opt: list = kwargs.pop('copy_pattern_opt', [])
@@ -112,28 +110,40 @@ class Encoder:
                 if not self.dry_run:
                     os.mkdir(path, 0o750)
                     self.logger.info('%s created', path)
+        self.read_jobs()
+        self._kwargs = kwargs
 
-        if enable_notifications:
+    async def async_init(self, _app=None):
+        kwargs = self._kwargs.copy()
+        if kwargs.get('no_notifications', False):
+            self.logger.info('No notifications')
+        else:
             if not self.notifier:
                 try:
                     self.notifier = Notifier(loop=self.loop, **kwargs)
+                    await self.notifier.init_task
                 except Exception:
                     self.logger.exception('Cannot initialize Notifier')
-        else:
-            self.logger.info('No notifications')
 
-        if enable_cleaner:
+            embed = self.make_embed()
+            embed.colour = Colour.light_grey()
+            embed.description = 'Started'
+            await self.send_notification(embed=embed)
+
+        if kwargs.pop('enable_cleaner', False):
             kwargs['check_path'] = self.src_path
             kwargs['notifier'] = self.notifier
             try:
                 self.cleaner = Cleaner(loop=self.loop, **kwargs)
+                await self.cleaner.init_task
             except Exception:
                 self.logger.exception('Cannot initialize Cleaner')
-        self.read_jobs()
-        embed = self.make_embed()
-        embed.colour = Colour.light_grey()
-        embed.description = 'Started'
-        self.loop.create_task(self.send_notification(embed=embed))
+
+    def signal_handler(self):
+        async def _run():
+            await self.close()
+            exit(0)
+        self.loop.create_task(_run())
 
     async def close(self, _app=None):
         """Cleanup"""
@@ -147,6 +157,7 @@ class Encoder:
 
     def run_app(self):
         app = web.Application()
+        app.on_startup.append(self.async_init)
         app.on_shutdown.append(self.close)
         routes = [
             web.get("/job/list", self.handler_list),
@@ -191,10 +202,6 @@ class Encoder:
         if not self.cleaner:
             return
         self.cleaner.en_del.set()
-
-    def signal_handler(self):
-        self.loop.run_until_complete(self.close())
-        exit(0)
 
     def read_jobs(self):
         if not os.path.exists(self.jobs_file):

@@ -23,7 +23,6 @@ class Recorder:
 
     def __init__(self, loop: asyncio.AbstractEventLoop, **kwargs):
         self.loop = loop
-        enable_notifications: bool = not kwargs.get('no_notifications', False)
         self.dry_run: bool = kwargs.get('dry_run', False)
         self.enc_path: str = kwargs.pop('enc_path', 'http://127.0.0.1:3626')
         self.notifier: Optional[Notifier] = kwargs.pop('notifier', None)
@@ -57,17 +56,6 @@ class Recorder:
         if self.dry_run:
             status_str += f'- DRY RUN\n'
         self.logger.info("\n%s", status_str)
-        self.loop.run_until_complete(self.async_init(user_login))
-
-        if enable_notifications:
-            if not self.notifier:
-                kwargs['sess'] = self.aio_sess
-                try:
-                    self.notifier = Notifier(loop=self.loop, **kwargs)
-                except Exception:
-                    self.logger.exception('Cannot initialize Notifier')
-        else:
-            self.logger.info('No notifications')
 
         # Check args
         if not os.path.exists(self.out_path):
@@ -76,13 +64,9 @@ class Recorder:
                 os.mkdir(self.out_path, 0o750)
                 self.logger.info('%s created', self.out_path)
 
-        embed = self.make_embed()
-        embed.colour = Colour.light_grey()
-        embed.description = 'Started'
-        self.loop.create_task(self.send_notification(embed=embed))
-        self.check_en.set()
+        self.init_task = self.loop.create_task(self.async_init(user_login, **kwargs))
 
-    async def async_init(self, user_login):
+    async def async_init(self, user_login, **kwargs):
         self.logger.debug("aiohttp session initialized.")
         self.aio_sess = ClientSession()
         if self.enc_path.startswith('/'):
@@ -94,6 +78,23 @@ class Recorder:
             await self.close()
             raise RuntimeError(f'Cannot find user {user_login}')
 
+        if kwargs.get('no_notifications', False):
+            self.logger.info('No notifications')
+        else:
+            if not self.notifier:
+                kwargs['sess'] = self.aio_sess
+                try:
+                    self.notifier = Notifier(loop=self.loop, **kwargs)
+                    await self.notifier.init_task
+                except Exception:
+                    self.logger.exception('Cannot initialize Notifier')
+
+            embed = self.make_embed()
+            embed.colour = Colour.light_grey()
+            embed.description = 'Started'
+            await self.send_notification(embed=embed)
+        self.check_en.set()
+
     async def close(self):
         embed = self.make_embed()
         embed.colour = Colour.orange()
@@ -103,8 +104,10 @@ class Recorder:
         self.logger.debug("aiohttp session closed")
 
     def signal_handler(self):
-        self.loop.run_until_complete(self.close())
-        exit(0)
+        async def _run():
+            await self.close()
+            exit(0)
+        self.loop.create_task(_run())
 
     def make_embed(self) -> Embed:
         embed = Embed()
