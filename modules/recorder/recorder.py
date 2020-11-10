@@ -14,7 +14,7 @@ from modules.notifier import Notifier
 from . import LOGGER, StreamData, InvalidResponseError, UserData
 
 NAME = 'Twitch Recorder'
-ICON_URL = 'https://raw.githubusercontent.com/cosandr/twitch-vods/master/icons/recorder.png'
+ICON_URL = 'https://raw.githubusercontent.com/cosandr/twitch-vods/874079098145fd99cbe0c41e5120b0e668af79be/icons/recorder.png'
 
 
 # noinspection PyBroadException

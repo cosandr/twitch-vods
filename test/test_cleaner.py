@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 import pytest_check as check
 
 import utils
-from modules import Cleaner
+from modules.auto_cleaner import Cleaner
 
 _base_video_path = 'media/twitch/RichardLewisReports'
 _base_raw_path = 'downloads/twitch'

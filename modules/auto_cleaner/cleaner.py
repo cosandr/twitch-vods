@@ -6,11 +6,11 @@ from typing import List, Tuple, Dict, Optional
 
 from discord import Embed
 
+from modules.notifier import Notifier
 from utils import get_datetime, setup_logger, human_timedelta, fmt_plural_str
-from .notifier import Notifier
 
 NAME = 'Twitch Cleaner'
-ICON_URL = 'https://raw.githubusercontent.com/cosandr/twitch-vods/master/icons/cleaner.png'
+ICON_URL = 'https://raw.githubusercontent.com/cosandr/twitch-vods/874079098145fd99cbe0c41e5120b0e668af79be/icons/cleaner.png'
 
 
 # noinspection PyBroadException

@@ -7,7 +7,7 @@ import cv2
 import numpy as np
 from skimage.metrics import mean_squared_error, structural_similarity
 
-from modules import IntroTrimmer
+from modules.intro_trimmer import IntroTrimmer
 from modules.intro_trimmer.config import Config
 from modules.intro_trimmer.utils import crop_to_regions
 

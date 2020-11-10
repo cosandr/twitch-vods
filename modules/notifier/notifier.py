@@ -10,7 +10,7 @@ from utils import setup_logger
 TIME_FORMAT = '%H:%M:%S'
 EMBED_COLOUR = 0x36393E  # "Transparent" when using dark theme
 USERNAME = 'Twitch'
-ICON_URL = 'https://raw.githubusercontent.com/cosandr/twitch-vods/master/icons/webhook.png'
+ICON_URL = 'https://raw.githubusercontent.com/cosandr/twitch-vods/874079098145fd99cbe0c41e5120b0e668af79be/icons/webhook.png'
 
 
 class Notifier:

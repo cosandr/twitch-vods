@@ -10,7 +10,7 @@ import traceback
 from datetime import datetime, timedelta
 from typing import List
 
-from modules import IntroTrimmer
+from modules.intro_trimmer import IntroTrimmer
 from utils import read_video_info_cv2
 
 TIME_FMT = '%y%m%d-%H%M'

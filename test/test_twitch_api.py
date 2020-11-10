@@ -1,6 +1,8 @@
 import asyncio
+
 import pytest
-from modules import Recorder
+
+from modules.recorder import Recorder
 
 ESL_CSGO_ID = 31239503
 

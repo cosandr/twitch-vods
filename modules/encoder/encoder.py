@@ -12,7 +12,9 @@ from typing import List, Optional
 from aiohttp import web
 from discord import Embed, Colour
 
-from modules import Cleaner, IntroTrimmer, Notifier
+from modules.auto_cleaner import Cleaner
+from modules.intro_trimmer import IntroTrimmer
+from modules.notifier import Notifier
 from utils import read_video_info, run_ffmpeg, setup_logger, get_datetime
 from . import Job, Response
 
@@ -38,7 +40,7 @@ progress=continue
 """
 
 NAME = 'Twitch Encoder'
-ICON_URL = 'https://raw.githubusercontent.com/cosandr/twitch-vods/master/icons/encoder.png'
+ICON_URL = 'https://raw.githubusercontent.com/cosandr/twitch-vods/874079098145fd99cbe0c41e5120b0e668af79be/icons/encoder.png'
 
 
 # noinspection PyBroadException

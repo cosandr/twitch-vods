@@ -1,6 +1,6 @@
 import os
 
-from modules import IntroTrimmer
+from modules.intro_trimmer import IntroTrimmer
 
 job = {
   "input": "200917-2259_richardlewisreports_Return_Of_By_The_Numbers_130.flv",
