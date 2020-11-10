@@ -2,11 +2,12 @@ import json
 from datetime import timezone, datetime
 
 from dateutil.parser import isoparse
+
 from modules.recorder import StreamData
 
 
 def test_stream_data_sample():
-    sample_file = 'samples/live_kraken.json'
+    sample_file = 'test/samples/live_kraken.json'
     with open(sample_file, 'r') as fr:
         data = json.load(fr)
     actual = StreamData.from_json(data)
