@@ -9,7 +9,7 @@ from typing import Dict, Optional
 
 import asyncpg
 
-from utils import setup_logger, get_datetime
+from utils import get_datetime
 
 """
 TODO:
@@ -51,9 +51,9 @@ class Generator:
         # Postgres connection string <user>:<pass>@<host>:<port>/<db>
         self.conn: Optional[asyncpg.Connection] = None
         # --- Logger ---
-        self.logger: logging.Logger = logging.getLogger(self.__class__.__name__)
-        self.logger.setLevel(logging.DEBUG)
-        setup_logger(self.logger, 'uuid')
+        log_parent: str = kwargs.get('log_parent', 'Twitch')
+        logger_name = f'{log_parent}.{self.__class__.__name__}'
+        self.logger: logging.Logger = logging.getLogger(logger_name)
         # --- Logger ---
         self.loop.add_signal_handler(signal.SIGTERM, self.signal_handler)
         self.init_task = self.loop.create_task(self.async_init())

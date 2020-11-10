@@ -2,9 +2,11 @@
 
 import argparse
 import asyncio
+import logging
 import os
 import re
 import traceback
+from logging.handlers import RotatingFileHandler
 from typing import Dict
 
 from modules import Encoder, Recorder, Generator, Notifier, Cleaner
@@ -214,10 +216,36 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def setup_logger() -> logging.Logger:
+    log_fmt = logging.Formatter('%(asctime)s:%(levelname)s:%(name)s: %(message)s')
+    # Console Handler
+    ch = logging.StreamHandler()
+    ch.setLevel(logging.INFO)
+    ch.setFormatter(log_fmt)
+    # File Handler
+    if not os.path.exists('log'):
+        os.mkdir('log')
+    fh = RotatingFileHandler(
+        filename=f'log/twitch.log',
+        maxBytes=int(1e6), backupCount=3,
+        encoding='utf-8', mode='a'
+    )
+    fh.setLevel(logging.DEBUG)
+    fh.setFormatter(log_fmt)
+    # Setup root logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.WARNING)
+    root_logger.addHandler(fh)
+    root_logger.addHandler(ch)
+    logger = logging.getLogger("Twitch")
+    logger.setLevel(logging.DEBUG)
+    return logger
+
+
 def main():
-    for folder in ('data', 'log'):
-        if not os.path.exists(folder):
-            os.mkdir(folder)
+    logger = setup_logger()
+    if not os.path.exists('data'):
+        os.mkdir('data')
     args = parse_args()
     loop = asyncio.get_event_loop()
     args.func(loop, args)

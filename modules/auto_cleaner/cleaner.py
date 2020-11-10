@@ -7,7 +7,7 @@ from typing import List, Tuple, Dict, Optional
 from discord import Embed
 
 from modules.notifier import Notifier
-from utils import get_datetime, setup_logger, human_timedelta, fmt_plural_str
+from utils import get_datetime, human_timedelta, fmt_plural_str
 
 NAME = 'Twitch Cleaner'
 ICON_URL = 'https://raw.githubusercontent.com/cosandr/twitch-vods/874079098145fd99cbe0c41e5120b0e668af79be/icons/cleaner.png'
@@ -40,14 +40,10 @@ class Cleaner:
             self.warn_at: List[int] = [48, 24, 12]
         self.warn_at.insert(0, 2*self.warn_at[0])
         # --- Logger ---
-        logger_name = self.__class__.__name__
-        if log_parent:
-            logger_name = f'{log_parent}.{logger_name}'
+        log_parent: str = kwargs.get('log_parent', 'Twitch')
+        logger_name = f'{log_parent}.{self.__class__.__name__}'
         self.logger: logging.Logger = logging.getLogger(logger_name)
-        self.logger.setLevel(logging.DEBUG)
         kwargs['log_parent'] = logger_name
-        if not log_parent:
-            setup_logger(self.logger, 'cleaner')
 
         self.pending: Dict[str, datetime] = {}
         # Track for which files we sent warnings for and when

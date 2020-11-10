@@ -15,7 +15,7 @@ from discord import Embed, Colour
 from modules.auto_cleaner import Cleaner
 from modules.intro_trimmer import IntroTrimmer
 from modules.notifier import Notifier
-from utils import read_video_info, run_ffmpeg, setup_logger, get_datetime
+from utils import read_video_info, run_ffmpeg, get_datetime
 from . import Job, Response
 
 """
@@ -74,10 +74,9 @@ class Encoder:
         self.time_format: str = kwargs.get('time_format', '%y%m%d-%H%M')
         trim_cfg_path: str = kwargs.pop('trim_cfg_path', 'data/trimmer/config.json')
         # --- Logger ---
-        logger_name = self.__class__.__name__
+        log_parent: str = kwargs.get('log_parent', 'Twitch')
+        logger_name = f'{log_parent}.{self.__class__.__name__}'
         self.logger: logging.Logger = logging.getLogger(logger_name)
-        self.logger.setLevel(logging.DEBUG)
-        setup_logger(self.logger, logger_name.lower())
         kwargs['log_parent'] = logger_name
         # --- Logger ---
         status_str = (

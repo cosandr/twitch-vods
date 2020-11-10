@@ -7,7 +7,7 @@ import cv2
 import numpy as np
 from skimage.metrics import structural_similarity
 
-from utils import run_ffmpeg, setup_logger
+from utils import run_ffmpeg
 from .config import Config
 from .utils import crop_to_regions
 
@@ -21,13 +21,9 @@ class IntroTrimmer:
         # Seconds to skip forwards the first time
         self.initial_gap: int = kwargs.pop('initial_gap', 300)
         # --- Logger ---
-        logger_name = self.__class__.__name__
-        if log_parent:
-            logger_name = f'{log_parent}.{logger_name}'
+        log_parent: str = kwargs.get('log_parent', 'Twitch')
+        logger_name = f'{log_parent}.{self.__class__.__name__}'
         self.logger: logging.Logger = logging.getLogger(logger_name)
-        self.logger.setLevel(logging.DEBUG)
-        if not log_parent:
-            setup_logger(self.logger, 'cropper')
         # --- Logger ---
         status_str = (
             f'- PID: {os.getpid()}\n'

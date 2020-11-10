@@ -5,8 +5,6 @@ from datetime import datetime
 from aiohttp import ClientSession
 from discord import Webhook, AsyncWebhookAdapter, Embed
 
-from utils import setup_logger
-
 TIME_FORMAT = '%H:%M:%S'
 EMBED_COLOUR = 0x36393E  # "Transparent" when using dark theme
 USERNAME = 'Twitch'
@@ -18,17 +16,12 @@ class Notifier:
         self.loop = loop
         self.sess: ClientSession = kwargs.get('sess', None)
         self.webhook = None
-        log_parent: str = kwargs.get('log_parent', '')
         self.mention_id: str = kwargs.pop('mention_id', '')
         self._created_sess = False
         # --- Logger ---
-        logger_name = self.__class__.__name__
-        if log_parent:
-            logger_name = f'{log_parent}.{logger_name}'
+        log_parent: str = kwargs.get('log_parent', 'Twitch')
+        logger_name = f'{log_parent}.{self.__class__.__name__}'
         self.logger: logging.Logger = logging.getLogger(logger_name)
-        self.logger.setLevel(logging.DEBUG)
-        if not log_parent:
-            setup_logger(self.logger, 'notifier')
         # --- Logger ---
         self.init_task = self.loop.create_task(self.async_init(webhook_url))
 

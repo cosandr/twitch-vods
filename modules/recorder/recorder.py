@@ -11,7 +11,7 @@ from discord import Embed, Colour
 
 from modules.encoder import Job
 from modules.notifier import Notifier
-from . import LOGGER, StreamData, InvalidResponseError, UserData
+from . import StreamData, InvalidResponseError, UserData
 
 NAME = 'Twitch Recorder'
 ICON_URL = 'https://raw.githubusercontent.com/cosandr/twitch-vods/874079098145fd99cbe0c41e5120b0e668af79be/icons/recorder.png'
@@ -40,9 +40,10 @@ class Recorder:
         self.user: Optional[UserData] = None
         self.loop.add_signal_handler(signal.SIGTERM, self.signal_handler)
         # --- Logger ---
-        self.logger = logging.getLogger(f'{LOGGER.name}.{user_login}')
-        self.logger.setLevel(logging.DEBUG)
-        kwargs['log_parent'] = self.logger.name
+        log_parent: str = kwargs.get('log_parent', 'Twitch')
+        logger_name = f'{log_parent}.{self.__class__.__name__}.{user_login}'
+        self.logger: logging.Logger = logging.getLogger(logger_name)
+        kwargs['log_parent'] = logger_name
         # --- Logger ---
         status_str = (
             f'- Encoder: {self.enc_path}\n'

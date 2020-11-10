@@ -1,9 +1,10 @@
+import logging
 from datetime import datetime, timezone
 from typing import Optional
 
 from dateutil.parser import isoparse
 
-from . import LOGGER
+logger = logging.getLogger('Twitch.Recorder.StreamData')
 
 
 class StreamData:
@@ -38,7 +39,7 @@ class StreamData:
                 # Convert UTC to local time
                 kwargs['created_at'] = kwargs['created_at'].replace(tzinfo=timezone.utc).astimezone(tz=None)
             except Exception as e:
-                LOGGER.warning(f'Cannot parse time string "{time_str}": {e}')
+                logger.warning(f'Cannot parse time string "{time_str}": {e}')
         kwargs['preview'] = data['preview']['medium']
         if data.get('channel'):
             kwargs['url'] = data['channel']['url']

@@ -4,7 +4,6 @@ import logging
 import os
 import re
 from datetime import datetime, timedelta
-from logging.handlers import RotatingFileHandler
 from typing import AsyncIterable, Union
 
 try:
@@ -105,25 +104,6 @@ async def watch_ffmpeg(logger: logging.Logger, stream: Union[AsyncIterable, asyn
     except ValueError as e:
         logger.warning('[ffmpeg] Stream Error: %s', str(e))
         pass
-
-
-def setup_logger(logger: logging.Logger, file_name: str):
-    """Adds console handler and rotating file handler at log/<file_name>.log"""
-    log_fmt = logging.Formatter('%(asctime)s:%(levelname)s:%(name)s: %(message)s')
-    # Console Handler
-    ch = logging.StreamHandler()
-    ch.setLevel(logging.INFO)
-    ch.setFormatter(log_fmt)
-    # File Handler
-    fh = RotatingFileHandler(
-        filename=f'log/{file_name}.log',
-        maxBytes=int(1e6), backupCount=3,
-        encoding='utf-8', mode='a'
-    )
-    fh.setLevel(logging.DEBUG)
-    fh.setFormatter(log_fmt)
-    logger.addHandler(fh)
-    logger.addHandler(ch)
 
 
 def get_datetime(name, time_fmt, path='.') -> datetime:
