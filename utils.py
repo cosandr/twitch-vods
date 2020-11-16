@@ -23,22 +23,30 @@ re_duration = re.compile(r'(?P<h>\d{1,2}):(?P<m>\d{2}):(?P<s>\d{2})\.(?P<ms>\d+)
 
 class BusyLock:
     """Async Lock with busy file"""
-    def __init__(self, lock: asyncio.Lock, file: str = ""):
+    def __init__(self, lock: asyncio.Lock, file: str = "", logger: logging.Logger = None):
         self.lock = lock
         self.file = file
+        self.logger = logger
+        if self.logger is None:
+            self.logger = logging.getLogger(f'Twitch.{self.__class__.__name__}')
 
     async def __aenter__(self):
         await self.lock.acquire()
+        self.logger.debug('Lock acquired')
         if not self.file:
+            self.logger.debug('No busy file configured')
             return
         # "touch" file
         with open(self.file, 'a'):
             os.utime(self.file, None)
+        self.logger.debug('%s created', self.file)
 
     async def __aexit__(self, exc_type, exc, tb):
         if self.file and os.path.exists(self.file):
             os.unlink(self.file)
+            self.logger.debug('%s deleted', self.file)
         self.lock.release()
+        self.logger.debug('Lock released')
 
 
 def parse_duration(time_str: str):

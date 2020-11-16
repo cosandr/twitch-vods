@@ -263,8 +263,7 @@ class Recorder:
             embed.set_thumbnail(url=self.stream.user_logo)
         await self.send_notification(embed=embed)
         # --- Send notification ---
-        async with BusyLock(self.lock, self.busy_file):
-            await self.record()
+        await self.record()
 
     async def record(self):
         self.check_en.clear()
@@ -284,7 +283,8 @@ class Recorder:
             return
         cmd = f"streamlink {self.stream.url} --default-stream best -o {raw_fp} -l info --force"
         try:
-            await self.run(cmd)
+            async with BusyLock(self.lock, self.busy_file, self.logger):
+                await self.run(cmd)
         except Exception as e:
             self.logger.error('Recording failed %s', str(e))
             if not os.path.exists(raw_fp):

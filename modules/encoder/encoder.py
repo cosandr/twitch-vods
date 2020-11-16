@@ -230,6 +230,10 @@ class Encoder:
         return resp.web_response
 
     async def run_job(self, job: Job):
+        async with BusyLock(self.lock, self.busy_file, self.logger):
+            await self._run_job(job)
+
+    async def _run_job(self, job: Job):
         # Create folder from username if needed
         if not job.created_at:
             job.created_at = get_datetime(job.input, self.time_format, self.src_path)
@@ -350,9 +354,8 @@ class Encoder:
             self.loop.create_task(self.run_job(job))
             resp.data = "Job started"
             return resp.web_response
-        async with BusyLock(self.lock, self.busy_file):
-            start = time.perf_counter()
-            await self.run_job(job)
+        start = time.perf_counter()
+        await self.run_job(job)
         resp.time = time.perf_counter() - start
         resp.data = "Job done"
         return resp.web_response
