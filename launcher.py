@@ -52,6 +52,7 @@ def run_cleaner(loop: asyncio.AbstractEventLoop, args: argparse.Namespace):
 
 def run_encoder(loop: asyncio.AbstractEventLoop, args: argparse.Namespace):
     env_map = {
+        "busy_file": "BUSY_FILE",
         "clean_days": None,
         "copy_pattern": None,
         "copy_pattern_opt": None,
@@ -134,6 +135,7 @@ def run_notifier(loop: asyncio.AbstractEventLoop, args: argparse.Namespace):
 def run_recorder(loop: asyncio.AbstractEventLoop, args: argparse.Namespace):
     env_map = {
         "dry_run": None,
+        "busy_file": "BUSY_FILE",
         "enc_path": "ENC_PATH",
         "no_notifications": None,
         "out_path": "REC_OUT",
@@ -170,6 +172,7 @@ def parse_args() -> argparse.Namespace:
     grp_global.add_argument('--no_notifications', action='store_true', default=False, help='Disable Discord notifications')
     grp_global.add_argument('--time_format', type=str, default='%y%m%d-%H%M', help='Time format string for videos, must not contain _')
     grp_global.add_argument('--webhook_url', type=str, help='Discord webhook URL')
+    grp_global.add_argument('--busy_file', type=str, help='Touch a file if we are busy and should not be stopped')
 
     # Cleaner options
     grp_cleaner = parser.add_argument_group(title='Cleaner options', description='Applies to standalone cleaner and encoder')
@@ -248,7 +251,11 @@ def main():
         os.mkdir('data')
     args = parse_args()
     loop = asyncio.get_event_loop()
-    args.func(loop, args)
+    try:
+        args.func(loop, args)
+    finally:
+        if args.busy_file and os.path.exists(args.busy_file):
+            os.unlink(args.busy_file)
 
 
 if __name__ == '__main__':

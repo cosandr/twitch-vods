@@ -15,7 +15,7 @@ from discord import Embed, Colour
 from modules.auto_cleaner import Cleaner
 from modules.intro_trimmer import IntroTrimmer
 from modules.notifier import Notifier
-from utils import read_video_info, run_ffmpeg, get_datetime
+from utils import read_video_info, run_ffmpeg, get_datetime, BusyLock
 from . import Job, Response
 
 """
@@ -60,6 +60,7 @@ class Encoder:
 
     def __init__(self, loop: asyncio.AbstractEventLoop, **kwargs):
         self.loop = loop
+        self.busy_file: str = kwargs.get('busy_file', "")
         self.cleaner: Optional[Cleaner] = kwargs.pop('cleaner', None)
         self.copy_pattern: str = kwargs.pop('copy_pattern', '.*')
         self.copy_pattern_opt: list = kwargs.pop('copy_pattern_opt', [])
@@ -101,6 +102,7 @@ class Encoder:
         else:
             self.re_copy = None
         self.logger.info('\n%s', status_str)
+        self.lock = asyncio.Lock()
         self.jobs: List[Job] = []
         self.trimmer = IntroTrimmer(cfg_path=trim_cfg_path, **kwargs)
         self.loop.add_signal_handler(signal.SIGTERM, self.signal_handler)
@@ -348,8 +350,9 @@ class Encoder:
             self.loop.create_task(self.run_job(job))
             resp.data = "Job started"
             return resp.web_response
-        start = time.perf_counter()
-        await self.run_job(job)
+        async with BusyLock(self.lock, self.busy_file):
+            start = time.perf_counter()
+            await self.run_job(job)
         resp.time = time.perf_counter() - start
         resp.data = "Job done"
         return resp.web_response

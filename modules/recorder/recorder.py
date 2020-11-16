@@ -11,6 +11,7 @@ from discord import Embed, Colour
 
 from modules.encoder import Job
 from modules.notifier import Notifier
+from utils import BusyLock
 from . import StreamData, InvalidResponseError, UserData
 
 NAME = 'Twitch Recorder'
@@ -23,6 +24,7 @@ class Recorder:
 
     def __init__(self, loop: asyncio.AbstractEventLoop, **kwargs):
         self.loop = loop
+        self.busy_file: str = kwargs.get('busy_file', "")
         self.dry_run: bool = kwargs.get('dry_run', False)
         self.enc_path: str = kwargs.pop('enc_path', 'http://127.0.0.1:3626')
         self.notifier: Optional[Notifier] = kwargs.pop('notifier', None)
@@ -34,6 +36,7 @@ class Recorder:
         self.aio_sess: Optional[ClientSession] = None
         self.check_en = asyncio.Event()
         self.ended_ok = False
+        self.lock = asyncio.Lock()
         self.notifier: Optional[Notifier] = None
         self.stream: Optional[StreamData] = None
         self.unix_sess: Optional[ClientSession] = None
@@ -260,7 +263,8 @@ class Recorder:
             embed.set_thumbnail(url=self.stream.user_logo)
         await self.send_notification(embed=embed)
         # --- Send notification ---
-        await self.record()
+        async with BusyLock(self.lock, self.busy_file):
+            await self.record()
 
     async def record(self):
         self.check_en.clear()

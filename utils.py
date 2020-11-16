@@ -21,6 +21,26 @@ re_watch = {
 re_duration = re.compile(r'(?P<h>\d{1,2}):(?P<m>\d{2}):(?P<s>\d{2})\.(?P<ms>\d+)')
 
 
+class BusyLock:
+    """Async Lock with busy file"""
+    def __init__(self, lock: asyncio.Lock, file: str = ""):
+        self.lock = lock
+        self.file = file
+
+    async def __aenter__(self):
+        await self.lock.acquire()
+        if not self.file:
+            return
+        # "touch" file
+        with open(self.file, 'a'):
+            os.utime(self.file, None)
+
+    async def __aexit__(self, exc_type, exc, tb):
+        if self.file and os.path.exists(self.file):
+            os.unlink(self.file)
+        self.lock.release()
+
+
 def parse_duration(time_str: str):
     """Parse HH:MM:SS.MICROSECONDS to timedelta"""
     if m := re_duration.match(time_str):
