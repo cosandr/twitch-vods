@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import platform
 import re
 import signal
 from typing import Optional
@@ -41,7 +42,8 @@ class Recorder:
         self.stream: Optional[StreamData] = None
         self.unix_sess: Optional[ClientSession] = None
         self.user: Optional[UserData] = None
-        self.loop.add_signal_handler(signal.SIGTERM, self.signal_handler)
+        if platform.system() != "Windows":
+            self.loop.add_signal_handler(signal.SIGTERM, self.signal_handler)
         # --- Logger ---
         log_parent: str = kwargs.get('log_parent', 'Twitch')
         logger_name = f'{log_parent}.{self.__class__.__name__}.{user_login}'

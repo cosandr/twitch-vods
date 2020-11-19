@@ -1,9 +1,4 @@
-__pycache__
-*.pyc
-.vscode
-.idea
-log/*.log*
-log/dumps/*
+log/
 data/jobs.json
 *.sock
 test/frames
@@ -12,3 +7,62 @@ test/log
 **/*.mp4
 **/*.flv
 .python-version
+
+# Editor files
+.vscode/settings.json
+.idea
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+.benchmarks
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Windows
+Thumbs.db

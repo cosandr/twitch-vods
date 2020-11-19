@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import platform
 import re
 import shutil
 import signal
@@ -105,7 +106,8 @@ class Encoder:
         self.lock = asyncio.Lock()
         self.jobs: List[Job] = []
         self.trimmer = IntroTrimmer(cfg_path=trim_cfg_path, **kwargs)
-        self.loop.add_signal_handler(signal.SIGTERM, self.signal_handler)
+        if platform.system() != "Windows":
+            self.loop.add_signal_handler(signal.SIGTERM, self.signal_handler)
         # Check source and destination directories
         for path in (self.src_path, self.out_path):
             if not os.path.exists(path):

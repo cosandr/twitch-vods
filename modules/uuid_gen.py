@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import logging
 import os
+import platform
 import signal
 import uuid
 from datetime import datetime, timedelta
@@ -55,7 +56,8 @@ class Generator:
         logger_name = f'{log_parent}.{self.__class__.__name__}'
         self.logger: logging.Logger = logging.getLogger(logger_name)
         # --- Logger ---
-        self.loop.add_signal_handler(signal.SIGTERM, self.signal_handler)
+        if platform.system() != "Windows":
+            self.loop.add_signal_handler(signal.SIGTERM, self.signal_handler)
         self.init_task = self.loop.create_task(self.async_init())
 
     def signal_handler(self):
